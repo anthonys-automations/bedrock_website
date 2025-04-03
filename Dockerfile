@@ -70,8 +70,15 @@ COPY ./build/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY ./build/nginx/sites-enabled/default.conf /etc/nginx/sites-available/default
 COPY ./build/php/8.2/fpm/pool.d /etc/php/8.2/fpm/pool.d
 COPY ./build/supervisor/supervisord.conf /etc/supervisord.conf
+COPY ./build/bin/run.sh /run.sh
+COPY ./build/php/php.ini /usr/local/etc/php/conf.d/php.ini
 
 COPY ./bedrock /srv/bedrock
+RUN cd /srv/bedrock \
+  && composer update \
+  && mkdir /var/log/php \
+  && chown www-data /var/log/php \
+  && chmod +x /run.sh
 
 WORKDIR /srv/bedrock
-CMD ["/bin/bash"]
+CMD ["/run.sh"]

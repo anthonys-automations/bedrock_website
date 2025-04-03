@@ -40,6 +40,10 @@
     "roots/wordpress": "6.7.2",
     "roots/wp-config": "1.0.0",
     "roots/wp-password-bcrypt": "1.2.0",
+    "wpackagist-plugin/woocommerce": "^9.7",
+    "wpackagist-plugin/woocommerce-gateway-stripe": "^9.3",
+    "wpackagist-plugin/woocommerce-paypal-payments": "^3.0",
+    "wpackagist-plugin/woocommerce-square": "^4.8",
     "wpackagist-theme/twentytwentyfive": "^1.0"
   },
   "require-dev": {

@@ -29,6 +29,8 @@ RUN chmod +x /usr/local/bin/install-php-extensions && sync \
     @composer \
     exif \
     gd \ 
+    imagick \
+    intl \
     memcached \
     mysqli \
     pcntl \

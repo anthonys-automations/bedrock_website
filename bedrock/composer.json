@@ -44,6 +44,9 @@
     "wpackagist-plugin/woocommerce-gateway-stripe": "^9.3",
     "wpackagist-plugin/woocommerce-paypal-payments": "^3.0",
     "wpackagist-plugin/woocommerce-square": "^4.8",
+    "wpackagist-plugin/webappick-product-feed-for-woocommerce": "^6.5",
+    "wpackagist-plugin/best-woocommerce-feed": "^7.4",
+    "wpackagist-plugin/woo-product-feed-pro": "^13.4",
     "wpackagist-theme/twentytwentyfive": "^1.0"
   },
   "require-dev": {

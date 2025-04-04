@@ -4,10 +4,10 @@ services:
       context: .
       dockerfile: ./Dockerfile
     container_name: bedrock
+    network_mode: bridge
     restart: always
     ports:
       - 80:80
     env_file: .env
     volumes:
       - /opt/1/uploads:/srv/bedrock/web/app/uploads
-      - /opt/1/plugins:/srv/bedrock/web/app/plugins

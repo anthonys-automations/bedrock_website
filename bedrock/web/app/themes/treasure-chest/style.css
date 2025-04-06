@@ -32,7 +32,6 @@ main {
   flex: 1;
   padding: 2rem;
   max-width: 1200px;
-  margin: 0 auto;
   box-sizing: border-box;
 }
 
@@ -67,7 +66,7 @@ header {
   box-shadow: 0 2px 6px rgba(0,0,0,0.05);
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 1000;
 }
 
 .logo {
@@ -114,6 +113,17 @@ nav ul li a {
 
 nav ul li a:hover {
   color: var(--accent-coral);
+}
+
+.woocommerce-ordering select.orderby {
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  font-family: 'Inter', sans-serif;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background-color: white;
+  color: var(--text-charcoal);
+  margin: 1rem 0;
 }
 
 @media screen and (max-width: 768px) {

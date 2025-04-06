@@ -6,7 +6,6 @@ Version: 1.0
 Description: Custom WooCommerce theme for secondhand items store with hardcoded graphics and layout. Minimal user customization, responsive design.
 */
 
-
 :root {
   --primary-navy: #364f6b;
   --cta-mint: #3fc1c9;
@@ -36,6 +35,24 @@ main {
   box-sizing: border-box;
 }
 
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Poppins', sans-serif;
+  color: var(--primary-navy);
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+h1 { font-size: 2.5rem; }
+h2 { font-size: 2rem; }
+h3 { font-size: 1.5rem; }
+h4 { font-size: 1.25rem; }
+h5 { font-size: 1rem; }
+h6 {
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 header {
   display: flex;
   justify-content: space-between;
@@ -51,6 +68,26 @@ header {
 .logo {
   height: 72px;
   width: 72px;
+}
+
+nav {
+  display: flex;
+  align-items: center;
+}
+
+.menu-toggle {
+  display: none;
+  flex-direction: column;
+  cursor: pointer;
+  margin-left: 1rem;
+}
+
+.menu-toggle span {
+  height: 3px;
+  width: 25px;
+  background-color: var(--primary-navy);
+  margin: 4px 0;
+  transition: 0.4s;
 }
 
 nav ul {
@@ -72,20 +109,6 @@ nav ul li a {
 
 nav ul li a:hover {
   color: var(--accent-coral);
-}
-
-.menu-toggle {
-  display: none;
-  flex-direction: column;
-  cursor: pointer;
-}
-
-.menu-toggle span {
-  height: 3px;
-  width: 25px;
-  background-color: var(--primary-navy);
-  margin: 4px 0;
-  transition: 0.4s;
 }
 
 @media screen and (max-width: 768px) {

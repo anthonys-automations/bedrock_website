@@ -1,0 +1,1 @@
+<?php /* single-product.php placeholder */ ?>

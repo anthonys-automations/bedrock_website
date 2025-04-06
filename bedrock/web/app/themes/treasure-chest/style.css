@@ -6,6 +6,7 @@ Version: 1.0
 Description: Custom WooCommerce theme for secondhand items store with hardcoded graphics and layout. Minimal user customization, responsive design.
 */
 
+
 :root {
   --primary-navy: #364f6b;
   --cta-mint: #3fc1c9;
@@ -14,11 +15,25 @@ Description: Custom WooCommerce theme for secondhand items store with hardcoded 
   --accent-coral: #fcad74;
 }
 
-body {
+html, body {
+  height: 100%;
   margin: 0;
   font-family: 'Inter', sans-serif;
   background: var(--background-cream);
   color: var(--text-charcoal);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+main {
+  flex: 1;
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  box-sizing: border-box;
 }
 
 header {
@@ -150,4 +165,5 @@ footer {
   padding: 2rem;
   text-align: center;
   font-size: 0.9rem;
+  margin-top: auto;
 }

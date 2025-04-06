@@ -8,8 +8,11 @@
 </head>
 <body <?php body_class(); ?>>
 <header>
-  <img src="<?php echo get_template_directory_uri(); ?>/assets/images/logo-orange.png" alt="Logo" class="logo">
+  <a href="<?php echo esc_url(home_url('/')); ?>">
+    <img src="<?php echo get_template_directory_uri(); ?>/assets/images/logo-orange.png" alt="Logo" class="logo">
+  </a>
   <nav>
     <?php wp_nav_menu(['theme_location' => 'primary', 'container' => false]); ?>
   </nav>
+  <div class="menu-toggle" id="mobile-menu">&#9776;</div>
 </header>

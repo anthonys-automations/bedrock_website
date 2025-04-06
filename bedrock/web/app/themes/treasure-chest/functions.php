@@ -41,4 +41,15 @@ function treasurechest_customize_register($wp_customize) {
   ]);
 }
 add_action('customize_register', 'treasurechest_customize_register');
+
+register_sidebar([
+  'name' => __('Main Sidebar'),
+  'id' => 'main-sidebar',
+  'description' => __('Widgets in this area will be shown on all posts and pages.'),
+  'before_widget' => '<section id="%1$s" class="widget %2$s">',
+  'after_widget'  => '</section>',
+  'before_title'  => '<h2 class="widget-title">',
+  'after_title'   => '</h2>',
+]);
+
 ?>

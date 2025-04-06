@@ -123,7 +123,15 @@ nav ul li a:hover {
   border-radius: 8px;
   background-color: white;
   color: var(--text-charcoal);
+}
+
+.woocommerce-notices-wrapper {
   margin: 1rem 0;
+}
+
+.woocommerce-products-header {
+  z-index: 1;
+  position: relative;
 }
 
 @media screen and (max-width: 768px) {

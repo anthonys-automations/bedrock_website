@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build_image:
+  image_build:
     runs-on: self-hosted
 
     steps:
@@ -24,4 +24,4 @@ jobs:
 
       - name: Docker build
         run: |
-          docker build .
+          docker build -t treasure-chest:latest .

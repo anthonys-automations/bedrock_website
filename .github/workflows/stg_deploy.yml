@@ -1,0 +1,13 @@
+name: Dev push triggers
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+jobs:
+  image_build:
+    uses: ./.github/workflows/image_build.yml
+    secrets: inherit    

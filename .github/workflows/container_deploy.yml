@@ -9,7 +9,7 @@ on:
       DOT_ENV_NAME:
         required: true
         type: string
-      IMAGE_TAG
+      IMAGE_TAG:
         required: true
         type: string
   workflow_dispatch:

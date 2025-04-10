@@ -6,7 +6,7 @@ on:
       branch:
         required: false
         type: string
-      IMAGE_TAG
+      IMAGE_TAG:
         required: true
         type: string
   workflow_dispatch:

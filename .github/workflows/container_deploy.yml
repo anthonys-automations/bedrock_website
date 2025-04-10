@@ -1,0 +1,38 @@
+name: Container deployment
+
+on:
+  workflow_call:
+    inputs:
+      DOCKER_HOST:
+        required: true
+        type: string
+    secrets:
+      DOT_ENV:
+        required: true
+  workflow_dispatch:
+
+jobs:
+  deploy_stg:
+    runs-on: ARM64
+    needs: image_build
+
+    env:
+      DOCKER_HOST: ${{ inputs.DOCKER_HOST }}
+      DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
+
+    steps:
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY_GITHUB }}
+
+      - name: Login to Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.DOCKER_REGISTRY }}
+          username: ${{ vars.DOCKER_REGISTRY_USERNAME }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Run docker container
+        run: |
+          echo "${{ secrets.DOT_ENV }}" > .env
+          docker compose up -d

@@ -1,6 +1,6 @@
 services:
   bedrock:
-    image: ${DOCKER_REGISTRY}/treasure-chest/treasure-chest:latest
+    image: $DOCKER_REGISTRY/treasure-chest/treasure-chest:latest
     container_name: bedrock
     network_mode: bridge
     restart: always

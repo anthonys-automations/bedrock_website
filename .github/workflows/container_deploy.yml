@@ -14,7 +14,6 @@ on:
 jobs:
   deploy_stg:
     runs-on: ARM64
-    needs: image_build
 
     env:
       DOCKER_HOST: ${{ inputs.DOCKER_HOST }}

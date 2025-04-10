@@ -7,8 +7,9 @@ on:
         required: true
         type: string
     secrets:
-      DOT_ENV:
-        required: true
+      - DOT_ENV
+      - SSH_PRIVATE_KEY_GITHUB
+      - DOCKER_REGISTRY_PASSWORD
   workflow_dispatch:
 
 jobs:

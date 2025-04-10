@@ -38,6 +38,7 @@ jobs:
         with:
           push: false
           pull: true
+          load: true
           no-cache: true
           tags: ${{ vars.DOCKER_REGISTRY }}/treasure-chest/treasure-chest:latest
 

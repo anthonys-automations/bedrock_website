@@ -8,13 +8,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  # image_build:
-  #   uses: ./.github/workflows/image_build.yml
-  #   secrets: inherit    
+  image_build:
+    uses: ./.github/workflows/image_build.yml
+    secrets: inherit    
 
   deploy_stg:
     runs-on: ARM64
-    # needs: image_build
+    needs: image_build
 
     env:
       DOCKER_HOST: ${{ vars.DOCKER_HOST_STG }}

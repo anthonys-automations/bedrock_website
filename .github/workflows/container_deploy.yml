@@ -6,10 +6,9 @@ on:
       DOCKER_HOST:
         required: true
         type: string
-    secrets:
-      - DOT_ENV
-      - SSH_PRIVATE_KEY_GITHUB
-      - DOCKER_REGISTRY_PASSWORD
+      DOT_ENV_NAME:
+        required: true
+        type: string
   workflow_dispatch:
 
 jobs:
@@ -35,5 +34,5 @@ jobs:
 
       - name: Run docker container
         run: |
-          echo "${{ secrets.DOT_ENV }}" > .env
+          echo "${{ secrets[format(DOT_ENV_{0}, inputs.DOT_ENV_NAME)] }}" > .env
           docker compose up -d

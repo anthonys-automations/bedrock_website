@@ -14,10 +14,8 @@ jobs:
 
   deploy_stg:
     uses: ./.github/workflows/container_deploy.yml
+    secrets: inherit
     needs: image_build
     with:
       DOCKER_HOST: ${{ vars.DOCKER_HOST_STG }}
-    secrets:
-      DOT_ENV: ${{ secrets.ENV_STG }}
-      SSH_PRIVATE_KEY_GITHUB: ${{ secrets.SSH_PRIVATE_KEY_GITHUB }}
-      DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+      DOT_ENV_NAME: STG

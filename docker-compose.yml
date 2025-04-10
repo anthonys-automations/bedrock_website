@@ -1,13 +1,11 @@
 services:
   bedrock:
-    build:
-      context: .
-      dockerfile: ./Dockerfile
+    image: ${ DOCKER_REGISTRY }/treasure-chest/treasure-chest:latest
     container_name: bedrock
     network_mode: bridge
     restart: always
     ports:
-      - 80:80
+      - 8081:80
     env_file: .env
     volumes:
-      - /opt/1/uploads:/srv/bedrock/web/app/uploads
+      - /mnt/treasure_chest_uploads:/srv/bedrock/web/app/uploads

@@ -1,4 +1,4 @@
-name: Dev push triggers
+name: STG deployment
 
 on:
   push:
@@ -11,3 +11,24 @@ jobs:
   image_build:
     uses: ./.github/workflows/image_build.yml
     secrets: inherit    
+
+  deploy_stg:
+    env:
+      DOCKER_HOST: ${{ vars.DOCKER_HOST_STG }}
+      DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
+
+    steps:
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY_GITHUB }}
+
+      - name: Login to Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.DOCKER_REGISTRY }}
+          username: ${{ vars.DOCKER_REGISTRY_USERNAME }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Run docker container
+        run: |
+          docker compose up -d

@@ -13,6 +13,8 @@ jobs:
     secrets: inherit    
 
   deploy_stg:
+    runs-on: ARM64
+
     env:
       DOCKER_HOST: ${{ vars.DOCKER_HOST_STG }}
       DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}

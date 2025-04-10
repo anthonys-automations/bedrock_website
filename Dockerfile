@@ -1,4 +1,4 @@
-FROM php:8.2-fpm as base
+FROM php:8.2-fpm AS base
 LABEL name=bedrock
 LABEL intermediate=true
 
@@ -18,7 +18,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && apt-get clean
 
-FROM base as php
+FROM base AS php
 LABEL name=bedrock
 LABEL intermediate=true
 
@@ -52,7 +52,7 @@ RUN chmod +x /usr/local/bin/install-php-extensions && sync \
   && rm -rf /var/lib/apt/lists/* \
   && apt-get clean
 
-FROM php as bedrock
+FROM php AS bedrock
 LABEL name=bedrock
 
 # Install nginx & supervisor

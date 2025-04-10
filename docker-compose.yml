@@ -1,11 +1,11 @@
 services:
   bedrock:
-    image: $DOCKER_REGISTRY/treasure-chest/treasure-chest:latest
-    container_name: bedrock
+    image: $DOCKER_REGISTRY/treasure-chest/treasure-chest:$IMAGE_TAG
+    container_name: treasure-chest-website
     network_mode: bridge
     restart: always
     ports:
-      - 8081:80
+      - $PORT:80
     env_file: .env
     volumes:
-      - /mnt/treasure_chest_uploads:/srv/bedrock/web/app/uploads
+      - $VOL:/srv/bedrock/web/app/uploads

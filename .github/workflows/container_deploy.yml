@@ -9,15 +9,17 @@ on:
       DOT_ENV_NAME:
         required: true
         type: string
+      IMAGE_TAG
+        required: true
+        type: string
   workflow_dispatch:
 
 jobs:
-  deploy_stg:
+  container_deploy:
     runs-on: ARM64
 
     env:
       DOCKER_HOST: ${{ inputs.DOCKER_HOST }}
-      DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
 
     steps:
       - uses: webfactory/ssh-agent@v0.9.0
@@ -32,6 +34,11 @@ jobs:
           password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
 
       - name: Run docker container
+        env:
+          DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
+          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+          PORT: 8081
+          VOL: /mnt/treasure_chest_uploads
         run: |
           echo "${{ secrets[format('DOT_ENV_{0}', inputs.DOT_ENV_NAME)] }}" > .env
           docker compose up -d

@@ -6,6 +6,9 @@ on:
       branch:
         required: false
         type: string
+      IMAGE_TAG
+        required: true
+        type: string
   workflow_dispatch:
 
 jobs:
@@ -40,8 +43,8 @@ jobs:
           pull: true
           load: true
           no-cache: true
-          tags: ${{ vars.DOCKER_REGISTRY }}/treasure-chest/treasure-chest:latest
+          tags: ${{ vars.DOCKER_REGISTRY }}/treasure-chest/treasure-chest:${{ inputs.IMAGE_TAG }}
 
       - name: Push to registry
         run: |
-          docker push ${{ vars.DOCKER_REGISTRY }}/treasure-chest/treasure-chest:latest
+          docker push ${{ vars.DOCKER_REGISTRY }}/treasure-chest/treasure-chest:${{ inputs.IMAGE_TAG }}

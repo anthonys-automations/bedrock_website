@@ -20,5 +20,5 @@ jobs:
     needs: image_build
     with:
       DOCKER_HOST: ${{ vars.DOCKER_HOST_STG }}
-      DOT_ENV_NAME: STG
+      ENV_NAME: STG
       IMAGE_TAG: latest

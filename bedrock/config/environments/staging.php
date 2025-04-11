@@ -17,4 +17,7 @@ use Roots\WPConfig\Config;
 
 Config::define('DISALLOW_INDEXING', true);
 Config::define('WP_MEMORY_LIMIT', '128M');
-Config::define('MYSQL_CLIENT_FLAGS', MYSQLI_CLIENT_SSL);
+
+Config::define('WP_DEBUG', true);
+Config::define('WP_DEBUG_DISPLAY', true);
+Config::define('WP_DEBUG_LOG', '/var/log/php/wp.log');

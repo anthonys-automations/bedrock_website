@@ -2,6 +2,7 @@ services:
   bedrock:
     image: $DOCKER_REGISTRY/treasure-chest/treasure-chest:$IMAGE_TAG
     container_name: treasure-chest_website
+    pull_policy: always
     network_mode: bridge
     restart: always
     ports:

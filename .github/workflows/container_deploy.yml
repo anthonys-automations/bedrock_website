@@ -23,7 +23,7 @@ jobs:
     runs-on: ARM64
 
     env:
-      DOCKER_HOST: ${{ vars['DOCKER_HOST_{0}', inputs.ENV_NAME)] }}
+      DOCKER_HOST: ${{ vars[format('DOCKER_HOST_{0}', inputs.ENV_NAME)] }}
 
     steps:
       - uses: webfactory/ssh-agent@v0.9.0

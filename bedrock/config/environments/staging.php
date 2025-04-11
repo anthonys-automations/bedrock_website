@@ -18,4 +18,3 @@ use Roots\WPConfig\Config;
 Config::define('DISALLOW_INDEXING', true);
 Config::define('WP_MEMORY_LIMIT', '128M');
 Config::define('MYSQL_CLIENT_FLAGS', MYSQLI_CLIENT_SSL);
-Config::define('MYSQL_CLIENT_FLAGS', MYSQLI_CLIENT_SSL_DONT_VERIFY_SERVER_CERT);

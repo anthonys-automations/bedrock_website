@@ -11,6 +11,7 @@ composer update
 #apt install mariadb-server
 #mysql -u root
 
-#create database wp;
-#create user bedrock identified by 'REDACTED';
-#grant all on wp.* to bedrock ;
+#create database treasurechest_website_stg;
+#create user 'treasure-chest_website_stg'@'%' identified by 'REDACTED';
+#
+#grant all on treasurechest_website_stg.* to 'treasure-chest_website_stg'@'%' ;

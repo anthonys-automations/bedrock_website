@@ -6,7 +6,7 @@ on:
       DOCKER_HOST:
         required: true
         type: string
-      DOT_ENV_NAME:
+      ENV_NAME:
         required: true
         type: string
       IMAGE_TAG:
@@ -38,7 +38,7 @@ jobs:
           DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
           IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
           PORT: 8081
-          VOL: /mnt/treasure_chest_uploads
+          VOL: /mnt/treasure-chest_uploads_STG
         run: |
-          echo "${{ secrets[format('DOT_ENV_{0}', inputs.DOT_ENV_NAME)] }}" > .env
+          echo "${{ secrets[format('DOT_ENV_{0}', inputs.ENV_NAME)] }}" > .env
           docker compose up -d

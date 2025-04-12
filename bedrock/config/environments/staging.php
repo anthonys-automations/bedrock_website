@@ -22,5 +22,11 @@ Config::define('WP_DEBUG', true);
 Config::define('WP_DEBUG_DISPLAY', true);
 Config::define('WP_DEBUG_LOG', '/var/log/php/wp.log');
 
-define('WP_PROXY_HOST', 'infra2.oci.verevkin.ca');
-define('WP_PROXY_PORT', '8888');
+Config::define('WP_PROXY_HOST', '10.0.1.17');
+Config::define('WP_PROXY_PORT', '8888');
+// Config::define('WP_HTTP_BLOCK_EXTERNAL', TRUE);
+// Config::define('WP_ACCESSIBLE_HOSTS', 'wordpress.org, domain.com');
+
+// Define constant to indicate we want REST API on localhost
+Config::define('FORCE_REST_API_LOCALHOST', true);
+

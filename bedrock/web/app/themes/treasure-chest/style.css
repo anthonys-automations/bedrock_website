@@ -33,6 +33,7 @@ main {
   padding: 2rem;
   max-width: 1200px;
   box-sizing: border-box;
+  margin: auto;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -132,6 +133,10 @@ nav ul li a:hover {
 .woocommerce-products-header {
   z-index: 1;
   position: relative;
+}
+
+.woocommerce a.added_to_cart {
+  padding-left: .5em;
 }
 
 @media screen and (max-width: 768px) {

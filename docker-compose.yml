@@ -6,7 +6,7 @@ services:
     network_mode: bridge
     restart: always
     ports:
-      - $PORT:80
+      - $PORT:443
     env_file: .env
     volumes:
       - $VOL:/srv/bedrock/web/app/uploads

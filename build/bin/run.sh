@@ -1,5 +1,6 @@
 #!/bin/bash
 
+chown www-data:www-data /srv/bedrock/web/app/
 chown www-data:www-data /srv/bedrock/web/app/uploads/
 #chown www-data:www-data /srv/bedrock/web/app/plugins/
 

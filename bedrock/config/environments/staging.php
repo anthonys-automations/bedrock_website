@@ -26,3 +26,5 @@ Config::define('WP_PROXY_HOST', '10.0.1.17');
 Config::define('WP_PROXY_PORT', '8888');
 // Config::define('WP_HTTP_BLOCK_EXTERNAL', TRUE);
 // Config::define('WP_ACCESSIBLE_HOSTS', 'wordpress.org, domain.com');
+
+Config::define('WP_CACHE', true); // WP-Optimize Cache

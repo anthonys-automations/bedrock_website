@@ -41,6 +41,8 @@
     "roots/wp-config": ">0",
     "roots/wp-password-bcrypt": ">0",
     "wpackagist-plugin/wp-optimize": ">0",
+    "wpackagist-plugin/ewww-image-optimizer": ">0",
+    "wpackagist-plugin/amazon-s3-and-cloudfront": ">0",
     "wpackagist-plugin/elementor": ">0",
     "wpackagist-plugin/essential-addons-for-elementor-lite": ">0",
     "wpackagist-plugin/header-footer-elementor": ">0",

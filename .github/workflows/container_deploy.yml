@@ -46,3 +46,11 @@ jobs:
         run: |
           echo "${{ secrets[format('DOT_ENV_{0}', inputs.ENV_NAME)] }}" > .env
           docker compose up -d
+
+      - name: Output container info
+        run: |
+          echo "```" >> "$GITHUB_STEP_SUMMARY"
+          hostname -f >> "$GITHUB_STEP_SUMMARY"
+          docker compose config --no-interpolate >> "$GITHUB_STEP_SUMMARY"
+          docker compose ps --no-trunc >> "$GITHUB_STEP_SUMMARY"
+          echo "```" >> "$GITHUB_STEP_SUMMARY"

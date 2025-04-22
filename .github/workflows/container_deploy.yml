@@ -24,7 +24,6 @@ jobs:
 
     env:
       DOCKER_HOST: ${{ vars[format('DOCKER_HOST_{0}', inputs.ENV_NAME)] }}
-      PORT: 8081
 
     steps:
       - uses: webfactory/ssh-agent@v0.9.0
@@ -42,6 +41,7 @@ jobs:
         env:
           DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
           IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+          PORT: 8081
           VOL: /mnt/treasure-chest_uploads_STG
         run: |
           echo "${{ secrets[format('DOT_ENV_{0}', inputs.ENV_NAME)] }}" > .env
@@ -49,5 +49,4 @@ jobs:
 
       - name: Output container info
         run: |
-          docker compose config --no-interpolate >> "$GITHUB_STEP_SUMMARY"
           docker compose ps --no-trunc >> "$GITHUB_STEP_SUMMARY"

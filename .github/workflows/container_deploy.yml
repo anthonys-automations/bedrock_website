@@ -24,6 +24,10 @@ jobs:
 
     env:
       DOCKER_HOST: ${{ vars[format('DOCKER_HOST_{0}', inputs.ENV_NAME)] }}
+      DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
+      IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+      PORT: 8081
+      VOL: /mnt/treasure-chest_uploads_STG
 
     steps:
       - uses: webfactory/ssh-agent@v0.9.0
@@ -38,11 +42,6 @@ jobs:
           password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
 
       - name: Run docker container
-        env:
-          DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
-          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
-          PORT: 8081
-          VOL: /mnt/treasure-chest_uploads_STG
         run: |
           echo "${{ secrets[format('DOT_ENV_{0}', inputs.ENV_NAME)] }}" > .env
           docker compose up -d

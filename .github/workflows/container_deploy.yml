@@ -49,8 +49,6 @@ jobs:
 
       - name: Output container info
         run: |
-          echo "```" >> "$GITHUB_STEP_SUMMARY"
           hostname -f >> "$GITHUB_STEP_SUMMARY"
           docker compose config --no-interpolate >> "$GITHUB_STEP_SUMMARY"
           docker compose ps --no-trunc >> "$GITHUB_STEP_SUMMARY"
-          echo "```" >> "$GITHUB_STEP_SUMMARY"

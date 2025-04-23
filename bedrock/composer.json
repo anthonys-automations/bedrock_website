@@ -59,6 +59,7 @@
     "wpackagist-plugin/flexible-shipping": ">0",
     "wpackagist-plugin/site-health-tool-manager": ">0",
     "wpackagist-plugin/merchant": ">0",
+    "wpackagist-plugin/wp-rest-api-authentication": ">0",
     "wpackagist-plugin/retainful-next-order-coupon-for-woocommerce": ">0",
     "wpackagist-plugin/yaymail": ">0",
     "wpackagist-plugin/yaysmtp": ">0",

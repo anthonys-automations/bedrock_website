@@ -21,3 +21,4 @@ jobs:
     with:
       ENV_NAME: STG
       IMAGE_TAG: latest
+      PORT: 8080

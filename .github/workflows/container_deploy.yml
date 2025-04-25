@@ -9,12 +9,18 @@ on:
       IMAGE_TAG:
         required: true
         type: string
+      PORT:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       ENV_NAME:
         required: true
         type: string
       IMAGE_TAG:
+        required: true
+        type: string
+      PORT:
         required: true
         type: string
 
@@ -26,8 +32,8 @@ jobs:
       DOCKER_HOST: ${{ vars[format('DOCKER_HOST_{0}', inputs.ENV_NAME)] }}
       DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
       IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
-      PORT: 8081
-      VOL: /mnt/treasure-chest_uploads_STG
+      PORT: ${{ inputs.PORT }}
+      VOL: /mnt/mountainofwonders_uploads_${{ inputs.ENV_NAME }}
 
     steps:
       - uses: webfactory/ssh-agent@v0.9.0

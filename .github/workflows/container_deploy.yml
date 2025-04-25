@@ -32,6 +32,7 @@ jobs:
       DOCKER_HOST: ${{ vars[format('DOCKER_HOST_{0}', inputs.ENV_NAME)] }}
       DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
       IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+      ENV_NAME: ${{ inputs.ENV_NAME }}
       PORT: ${{ inputs.PORT }}
       VOL: /mnt/mountainofwonders_uploads_${{ inputs.ENV_NAME }}
 

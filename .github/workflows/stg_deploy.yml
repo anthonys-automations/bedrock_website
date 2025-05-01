@@ -19,6 +19,6 @@ jobs:
     secrets: inherit
     needs: image_build
     with:
-      ENV_NAME: STG
+      ENV_NAME: MOUNTAINOFWONDERS_STG
       IMAGE_TAG: latest
       PORT: 8080

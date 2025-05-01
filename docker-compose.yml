@@ -1,7 +1,7 @@
 services:
-  mountainofwonders_website:
+  bedrock_website:
     image: $DOCKER_REGISTRY/treasure-chest/treasure-chest:$IMAGE_TAG
-    container_name: mountainofwonders_$ENV_NAME
+    container_name: bedrock_$ENV_NAME
     pull_policy: always
     restart: always
     ports:

@@ -50,7 +50,7 @@ jobs:
 
       - name: Run docker container
         run: |
-          echo "${{ secrets[format('DOT_ENV_{0}', inputs.ENV_NAME)] }}" > .env
+          echo "${{ secrets[format('DOT_ENV_{0}', inputs.ENV_NAME)] }}" | base64 -d > .env
           docker compose --project-name "$ENV_NAME" up -d
 
       - name: Output container info

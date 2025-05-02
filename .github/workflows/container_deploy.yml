@@ -51,7 +51,7 @@ jobs:
       - name: Run docker container
         run: |
           echo "${{ secrets[format('DOT_ENV_{0}', inputs.ENV_NAME)] }}" > .env
-          docker compose up -d
+          docker compose --project-name "$ENV_NAME" up -d
 
       - name: Output container info
         run: |

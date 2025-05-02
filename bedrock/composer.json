@@ -78,7 +78,6 @@
     "wpackagist-plugin/classic-editor": ">0",
     "wpackagist-plugin/admin-site-enhancements": ">0",
     "wpackagist-plugin/wpo365-login": ">0",
-    "wpackagist-plugin/ultimate-addons-for-Gutenberg": ">0",
     "wpackagist-plugin/suremails": ">0",
     "wpackagist-plugin/wp-live-chat-support": ">0",
     "wpackagist-plugin/leadin": ">0",
@@ -87,7 +86,6 @@
     "wpackagist-theme/blocksy": ">0",
     "wpackagist-plugin/blocksy-companion": ">0",
     "wpackagist-theme/astra": ">0",
-    "wpackagist-plugin/astra-sites": ">0",
     "wpackagist-theme/twentytwentyfive": ">0"
   },
   "require-dev": {

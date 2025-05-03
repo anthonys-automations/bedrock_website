@@ -15,7 +15,7 @@ use Roots\WPConfig\Config;
  * Example: `Config::define('DISALLOW_FILE_MODS', false);`
  */
 
-Config::define('DISALLOW_INDEXING', true);
+Config::define('DISALLOW_INDEXING', false);
 Config::define('WP_MEMORY_LIMIT', '128M');
 
 Config::define('WP_DEBUG', true);

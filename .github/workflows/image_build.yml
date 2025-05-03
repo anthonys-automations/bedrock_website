@@ -52,3 +52,7 @@ jobs:
       - name: Output image info
         run: |
           docker image ls --no-trunc ${{ vars.DOCKER_REGISTRY }}/treasure-chest/treasure-chest:${{ inputs.IMAGE_TAG }} >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Images cleanup
+        run: |
+          docker image prune -f

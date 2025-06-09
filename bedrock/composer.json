@@ -51,6 +51,8 @@
     "wpackagist-plugin/woocommerce-gateway-stripe": ">0",
     "wpackagist-plugin/woocommerce-paypal-payments": ">0",
     "wpackagist-plugin/woocommerce-square": ">0",
+    "wpackagist-plugin/cryptocurrency-payment-gateway": ">0",
+    "wpackagist-plugin/btcpay-greenfield-for-woocommerce": ">0",
     "wpackagist-plugin/webappick-product-feed-for-woocommerce": ">0",
     "wpackagist-plugin/best-woocommerce-feed": ">0",
     "wpackagist-plugin/woo-product-feed-pro": ">0",

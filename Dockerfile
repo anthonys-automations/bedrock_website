@@ -36,6 +36,8 @@ RUN chmod +x /usr/local/bin/install-php-extensions && sync \
     pcntl \
     pdo_mysql \
     zip \
+    gmp \
+    bcmath \
   && apt-get update \
   && apt-get install -y \
     gifsicle \

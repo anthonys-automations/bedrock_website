@@ -58,6 +58,8 @@
     "wpackagist-plugin/best-woocommerce-feed": ">0",
     "wpackagist-plugin/woo-product-feed-pro": ">0",
     "wpackagist-plugin/canada-post-shipping-for-woocommerce": ">0",
+    "wpackagist-plugin/wc-shippo-shipping": ">0",
+    "wpackagist-plugin/clickship": ">0",
     "wpackagist-plugin/woocommerce-email-money-transfer-gateway": ">0",
     "wpackagist-plugin/emails-verification-for-woocommerce": ">0",
     "wpackagist-plugin/flexible-shipping": ">0",

@@ -26,6 +26,7 @@ on:
 
 jobs:
   container_deploy:
+    name: "${{ inputs.IMAGE_TAG }} at ${{ inputs.ENV_NAME }}"
     runs-on: ARM64
 
     env:

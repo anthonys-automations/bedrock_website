@@ -9,12 +9,14 @@ on:
 
 jobs:
   image_build:
+    name: "Build image"
     uses: ./.github/workflows/image_build.yml
     secrets: inherit
     with: 
       IMAGE_TAG: latest
 
   deploy_stg:
+    name: "Container deployment"
     uses: ./.github/workflows/container_deploy.yml
     secrets: inherit
     needs: image_build

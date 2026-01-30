@@ -11,6 +11,9 @@ on:
         type: string
   workflow_dispatch:
 
+env:
+  DOCKERHUB_REPO: anthonysautomations/bedrock_website
+
 jobs:
   image_build:
     name: "${{ inputs.branch || github.ref }}"
@@ -21,13 +24,16 @@ jobs:
         run: |
           echo "Using branch: ${{ inputs.branch || github.ref }}"
 
-      - name: Login to Docker Registry
+      - name: Generate ISO timestamp tag
+        id: timestamp
+        run: echo "tag=$(date -u +'%Y-%m-%dT%H-%M-%SZ')" >> $GITHUB_OUTPUT
+      
+      - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
-          registry: ${{ vars.DOCKER_REGISTRY }}
-          username: ${{ vars.DOCKER_REGISTRY_USERNAME }}
-          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
-
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Shallow clones should be disabled
@@ -36,24 +42,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and no push
-        id: docker_build
+      - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          push: false
-          pull: true
-          load: true
-          no-cache: true
-          tags: ${{ vars.DOCKER_REGISTRY }}/treasure-chest/treasure-chest:${{ inputs.IMAGE_TAG }}
-
-      - name: Push to registry
-        run: |
-          docker push ${{ vars.DOCKER_REGISTRY }}/treasure-chest/treasure-chest:${{ inputs.IMAGE_TAG }}
-
-      - name: Output image info
-        run: |
-          docker image ls --no-trunc ${{ vars.DOCKER_REGISTRY }}/treasure-chest/treasure-chest:${{ inputs.IMAGE_TAG }} >> "$GITHUB_STEP_SUMMARY"
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_REPO }}:latest
+            ${{ env.DOCKERHUB_REPO }}:${{ steps.timestamp.outputs.tag }}
+            ${{ env.DOCKERHUB_REPO }}:${{ inputs.IMAGE_TAG }}
+          # Add Git hash as image label for traceability
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          # Build arguments to embed Git hash in the image
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
 
       - name: Images cleanup
         run: |
           docker image prune -f
+
+      - name: Add build summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ env.DOCKERHUB_REPO }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tags:** latest, ${{ steps.timestamp.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Git Hash:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

@@ -1,6 +1,6 @@
 services:
   bedrock_website:
-    image: $DOCKER_REGISTRY/treasure-chest/treasure-chest:$IMAGE_TAG
+    image: anthonysautomations/bedrock_website:$IMAGE_TAG
     container_name: bedrock_$ENV_NAME
     pull_policy: always
     restart: always

@@ -22,8 +22,11 @@ Config::define('WP_DEBUG', true);
 Config::define('WP_DEBUG_DISPLAY', false);
 Config::define('WP_DEBUG_LOG', '/var/log/php/wp.log');
 
-Config::define('WP_PROXY_HOST', '10.0.1.17');
-Config::define('WP_PROXY_PORT', '8888');
+if (env('PROXY_HOST')) {
+    Config::define('WP_PROXY_HOST', env('PROXY_HOST'));
+    Config::define('WP_PROXY_PORT', env('PROXY_PORT') ?: '8888');
+}
+
 // Config::define('WP_HTTP_BLOCK_EXTERNAL', TRUE);
 // Config::define('WP_ACCESSIBLE_HOSTS', 'wordpress.org, domain.com');
 

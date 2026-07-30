@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
-# Manually builds and publishes the bedrock_website image for linux/amd64.
+# Manually builds and publishes the bedrock_website image for linux/arm64.
 #
-# Added alongside the arm64 GitHub Actions pipeline: CI runs on the self-hosted
-# ARM64 runner, so amd64 images are produced by hand on an irregular schedule.
+# Added alongside the amd64 GitHub Actions pipeline: CI runs on ubuntu-latest,
+# so arm64 images are produced by hand on an irregular schedule.
 # They still have to follow the same immutable, sortable, architecture-scoped
-# tag contract as the automated arm64 builds (docs/image-versioning.md), which
+# tag contract as the automated amd64 builds (docs/image-versioning.md), which
 # is why the version is allocated by the very same scripts/next-version.sh.
 #
 # Tags published:
-#   <YYYY>.<MM>.<DD>.<N>-amd64   immutable release, this is what deployments pin
-#   latest-amd64                 moving alias, convenience only - never deploy it
+#   <YYYY>.<MM>.<DD>.<N>-arm64   immutable release, this is what deployments pin
+#   latest-arm64                 moving alias, convenience only - never deploy it
 #
-# The amd64 version is allocated independently of arm64 on purpose: a manual
-# amd64 build weeks after an arm64 build resolves different Debian packages and
+# The arm64 version is allocated independently of amd64 on purpose: a manual
+# arm64 build weeks after an amd64 build resolves different Debian packages and
 # different `composer update` results, so pretending they are the same release
 # would be a lie. The unsuffixed tags stay reserved for a promoted
 # multi-architecture manifest.
@@ -26,7 +26,7 @@
 #   docker buildx imagetools inspect --format '{{ json .SBOM }}' <repo>:<tag>
 #
 # Usage:
-#   scripts/build-amd64.sh
+#   scripts/build-arm64.sh
 #
 # Environment:
 #   DOCKERHUB_NAMESPACE   DockerHub namespace (default: anthonysautomations)
@@ -40,8 +40,8 @@
 #                         recorded revision will then not match what was
 #                         actually built - avoid for real releases)
 #
-# Requires a buildx builder able to produce linux/amd64 (a native amd64 host, or
-# qemu registered via `docker run --privileged --rm tonistiigi/binfmt --install amd64`).
+# Requires a buildx builder able to produce linux/arm64 (a native arm64 host, or
+# qemu registered via `docker run --privileged --rm tonistiigi/binfmt --install arm64`).
 #
 # Run only one instance at a time. The version is checked to be unused when it
 # is allocated, not when it is pushed, so two genuinely overlapping runs could
@@ -63,7 +63,7 @@ fi
 namespace=${DOCKERHUB_NAMESPACE:-anthonysautomations}
 image=${DOCKERHUB_IMAGE:-bedrock_website}
 repo="${namespace}/${image}"
-arch=amd64
+arch=arm64
 platform="linux/${arch}"
 
 context_dir="${repo_root}"

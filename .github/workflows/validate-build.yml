@@ -14,7 +14,7 @@
 # image bump that still builds but no longer serves is the failure worth
 # catching on a Renovate branch.
 #
-# Runs on the same self-hosted ARM64 runner as the release build so a base image
+# Runs on the same ubuntu-latest runner as the release build so a base image
 # bump is validated on the architecture it will actually be published for.
 name: Validate Image Build
 
@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ARM64
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -40,7 +40,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/arm64
+          platforms: linux/amd64
           push: false
           # Loaded into the local daemon so the runtime smoke test below can
           # actually start it. Since the switch from nginx + PHP-FPM +

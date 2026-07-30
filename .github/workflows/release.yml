@@ -1,0 +1,20 @@
+# Publishes a new amd64 image on every push to `dev`/`main`.
+#
+# Deployment is deliberately not chained here: releases are published, then
+# rolled out separately by dispatching container_deploy.yml with the immutable
+# tag this run allocated. Keeping build and deploy apart means a push cannot
+# move a running environment on its own.
+name: Release image
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+jobs:
+  image_build:
+    name: "Build image"
+    uses: ./.github/workflows/image_build.yml
+    secrets: inherit

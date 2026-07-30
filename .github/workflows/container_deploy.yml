@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       IMAGE_TAG:
-        description: 'Immutable release tag, e.g. 2026.07.30.1-arm64 (see docs/image-versioning.md); moving aliases such as latest-arm64 must not be deployed'
+        description: 'Immutable release tag, e.g. 2026.07.30.1-amd64 (see docs/image-versioning.md); moving aliases such as latest-amd64 must not be deployed'
         required: true
         type: string
       PORT:
@@ -20,7 +20,7 @@ on:
         required: true
         type: string
       IMAGE_TAG:
-        description: 'Immutable release tag, e.g. 2026.07.30.1-arm64 (see docs/image-versioning.md); moving aliases such as latest-arm64 must not be deployed'
+        description: 'Immutable release tag, e.g. 2026.07.30.1-amd64 (see docs/image-versioning.md); moving aliases such as latest-amd64 must not be deployed'
         required: true
         type: string
       PORT:

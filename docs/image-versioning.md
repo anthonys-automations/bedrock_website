@@ -19,28 +19,28 @@ would not change either.
 ## Tag contract
 
 ```text
-<YYYY>.<MM>.<DD>.<N>-<arch>        e.g. 2026.07.30.1-arm64
+<YYYY>.<MM>.<DD>.<N>-<arch>        e.g. 2026.07.30.1-amd64
 ```
 
 | Field | Meaning |
 | --- | --- |
 | `YYYY.MM.DD` | UTC date of the build |
 | `N` | 1-based sequence within that date and architecture |
-| `arch` | `arm64` or `amd64` |
+| `arch` | `amd64` or `arm64` |
 
 | Tag | Mutability | Role |
 | --- | --- | --- |
-| `2026.07.30.1-arm64` | immutable | deployable release — pin this |
-| `latest-arm64` / `latest-amd64` | moving | human convenience only, never deploy |
+| `2026.07.30.1-amd64` | immutable | deployable release — pin this |
+| `latest-amd64` / `latest-arm64` | moving | human convenience only, never deploy |
 | `latest` / unsuffixed version | reserved | future promoted multi-architecture manifest |
 
 Rules:
 
 - Release tags are never overwritten; the allocator verifies the tag is unused
   and aborts otherwise.
-- Each architecture allocates its versions independently. A manual amd64 build
-  made weeks after an arm64 build resolves different packages, so giving it the
-  arm64 version would assert an equivalence that does not exist.
+- Each architecture allocates its versions independently. A manual arm64 build
+  made weeks after an amd64 build resolves different packages, so giving it the
+  amd64 version would assert an equivalence that does not exist.
 - No single-architecture pipeline publishes an unsuffixed tag. Those are
   reserved for a manifest that genuinely contains every architecture.
 - All timestamps are UTC.
@@ -49,27 +49,27 @@ Rules:
 
 | Architecture | Produced by | Cadence |
 | --- | --- | --- |
-| `arm64` | [.github/workflows/image_build.yml](../.github/workflows/image_build.yml) on the self-hosted `ARM64` runner | on push to `dev`/`main`, weekly cron, manual dispatch |
-| `amd64` | [scripts/build-amd64.sh](../scripts/build-amd64.sh), run by hand | irregular |
+| `amd64` | [.github/workflows/image_build.yml](../.github/workflows/image_build.yml) on `ubuntu-latest` | on push to `dev`/`main`, weekly cron, manual dispatch |
+| `arm64` | [scripts/build-arm64.sh](../scripts/build-arm64.sh), run by hand | irregular |
 
 Both allocate versions through the same
 [scripts/next-version.sh](../scripts/next-version.sh), so the manual
 architecture obeys exactly the same contract as CI. That shared script — rather
 than inline workflow steps — is the reason the two cannot drift apart.
 
-Building amd64 by hand:
+Building arm64 by hand:
 
 ```sh
 export DOCKERHUB_USERNAME=... DOCKERHUB_TOKEN=...
-./scripts/build-amd64.sh
+./scripts/build-arm64.sh
 ```
 
 It refuses to publish from a dirty working tree (override with `ALLOW_DIRTY=1`,
 which makes the recorded commit a lie — avoid for real releases), and requires a
-buildx builder that can produce `linux/amd64`:
+buildx builder that can produce `linux/arm64`:
 
 ```sh
-docker run --privileged --rm tonistiigi/binfmt --install amd64
+docker run --privileged --rm tonistiigi/binfmt --install arm64
 ```
 
 ## Version allocation
@@ -87,7 +87,7 @@ does not exist yet) counts as "no tags". A failed or malformed listing aborts,
 because treating it as empty could allocate a version that sorts *older* than
 one already published — which an updater would never offer as an update.
 
-The arm64 job sets a `concurrency` group so two runs on the same day cannot race
+The amd64 job sets a `concurrency` group so two runs on the same day cannot race
 for the same sequence number. The manual script does not serialise itself; run
 only one at a time.
 
@@ -124,16 +124,17 @@ actually pushed:
 
 ```sh
 docker buildx imagetools inspect --format '{{ json .SBOM }}' \
-  anthonysautomations/bedrock_website:2026.07.30.1-arm64
+  anthonysautomations/bedrock_website:2026.07.30.1-amd64
 ```
 
 ## Consuming the images
 
 Deployments must pin an immutable release tag.
-[stg_deploy.yml](../.github/workflows/stg_deploy.yml) passes the tag the build
-job just allocated straight into
-[container_deploy.yml](../.github/workflows/container_deploy.yml), which feeds
-`IMAGE_TAG` in [docker-compose.yml](../docker-compose.yml).
+[release.yml](../.github/workflows/release.yml) only *publishes* an image on
+push; it does not roll anything out. Deploying is a separate, deliberate step:
+dispatch [container_deploy.yml](../.github/workflows/container_deploy.yml) with
+the release tag, which feeds `IMAGE_TAG` in
+[docker-compose.yml](../docker-compose.yml).
 
 **Migration note:** the plain `latest` tag is no longer updated. Anything still
 pulling `anthonysautomations/bedrock_website:latest` is now pinned to a stale

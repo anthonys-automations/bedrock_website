@@ -116,8 +116,8 @@ Published images use an immutable, architecture-scoped calendar version:
 anthonysautomations/bedrock_website:<YYYY>.<MM>.<DD>.<N>-<arch>
 ```
 
-- `arm64` is built by CI (`.github/workflows/image_build.yml`) on push to `dev`/`main` and weekly.
-- `amd64` is built by hand with `./scripts/build-amd64.sh`.
+- `amd64` is built by CI (`.github/workflows/image_build.yml`) on push to `dev`/`main` and weekly.
+- `arm64` is built by hand with `./scripts/build-arm64.sh`.
 - `latest-<arch>` is a convenience alias only. **Never deploy it**, and note that the plain `latest` tag is no longer updated.
 - The pinned PHP base image is bumped automatically by Renovate (`.github/workflows/renovate.yml`, policy in `renovate.json`).
 

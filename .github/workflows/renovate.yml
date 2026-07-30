@@ -51,8 +51,8 @@ env:
 
 jobs:
   renovate:
-    # GitHub-hosted on purpose: the self-hosted ARM64 runner is reserved for
-    # image builds, and the Renovate container is published for amd64.
+    # GitHub-hosted on purpose: the Renovate container is published for amd64,
+    # and this run needs nothing from the self-hosted deployment runner.
     runs-on: ubuntu-latest
 
     steps:

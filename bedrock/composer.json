@@ -23,6 +23,9 @@
     "issues": "https://github.com/roots/bedrock/issues",
     "forum": "https://discourse.roots.io/category/bedrock"
   },
+  "_comment": [
+    "Removed 'wpackagist-plugin/wp-lister-for-ebay': WordPress.org closed the plugin on 2026-07-21 pending review, so wpackagist stopped publishing it and 'composer update' now fails with 'could not be found in any version'. Because this project pins nothing (open '>0' constraints, no committed composer.lock) every image build re-resolves from wpackagist, so a closed plugin breaks the build outright rather than degrading quietly. Restore the requirement only once the plugin is listed on wordpress.org again."
+  ],
   "repositories": [
     {
       "type": "composer",
@@ -87,7 +90,6 @@
     "wpackagist-plugin/wp-live-chat-support": ">0",
     "wpackagist-plugin/leadin": ">0",
     "wpackagist-plugin/tidio-live-chat": ">0",
-    "wpackagist-plugin/wp-lister-for-ebay": ">0",
     "wpackagist-plugin/advanced-woo-search": ">0",
     "wpackagist-theme/blocksy": ">0",
     "wpackagist-plugin/blocksy-companion": ">0",

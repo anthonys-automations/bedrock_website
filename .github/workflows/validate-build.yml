@@ -14,6 +14,14 @@
 # image bump that still builds but no longer serves is the failure worth
 # catching on a Renovate branch.
 #
+# The container is validated against a throwaway MariaDB and a real WordPress
+# install, so `/` is expected to answer 200 with a rendered page. An earlier
+# revision ran it without a database, accepted "any status that is not a
+# connection failure" for the site itself, and therefore reported success on a
+# container that only ever returned 500 - the run was green while the site was
+# broken. Every request assertion here now names the exact status it expects,
+# and the container's error stream must be free of PHP errors.
+#
 # Runs on the same ubuntu-latest runner as the release build so a base image
 # bump is validated on the architecture it will actually be published for.
 name: Validate Image Build
@@ -23,6 +31,18 @@ on:
 
 permissions:
   contents: read
+
+env:
+  IMAGE: bedrock_website:validate
+  NETWORK: bedrock_validate_net
+  APP_CONTAINER: bedrock_validate
+  NOLOG_CONTAINER: bedrock_validate_nolog
+  DB_CONTAINER: bedrock_validate_db
+  DB_IMAGE: mariadb:11
+  DB_NAME: bedrock
+  DB_USER: bedrock
+  SITE_NAME: bedrock.validate.local
+  WP_TITLE: bedrock validate
 
 jobs:
   validate:
@@ -54,20 +74,78 @@ jobs:
           build-args: |
             GIT_COMMIT=${{ github.sha }}
 
-      - name: Smoke test the Apache runtime
-        env:
-          SITE_NAME: bedrock.validate.local
+      # Generated per run rather than checked in: nothing outside this job ever
+      # needs them, and a literal password in the workflow file is both a
+      # secret-scanning finding and an invitation to reuse it elsewhere.
+      - name: Generate throwaway credentials
         run: |
           set -euo pipefail
 
-          docker run -d --name bedrock_validate -e SITE_NAME="${SITE_NAME}" \
-            bedrock_website:validate
+          for var in DB_ROOT_PASSWORD DB_PASSWORD WP_ADMIN_PASSWORD; do
+            value=$(openssl rand -hex 24)
+            echo "::add-mask::${value}"
+            echo "${var}=${value}" >> "${GITHUB_ENV}"
+          done
 
-          # No database is attached, so WordPress itself will error. What is
-          # under test is the web layer: Apache must start, answer on both
-          # ports and enforce the uploads rule.
+      # WordPress needs a database to render anything, and without one the site
+      # returns 500 - which is precisely the state this workflow used to pass
+      # on. Its own container on a private network keeps the runner clean.
+      - name: Start MariaDB
+        run: |
+          set -euo pipefail
+
+          docker network create "${NETWORK}"
+
+          docker run -d --name "${DB_CONTAINER}" --network "${NETWORK}" \
+            -e MARIADB_ROOT_PASSWORD="${DB_ROOT_PASSWORD}" \
+            -e MARIADB_DATABASE="${DB_NAME}" \
+            -e MARIADB_USER="${DB_USER}" \
+            -e MARIADB_PASSWORD="${DB_PASSWORD}" \
+            --health-cmd 'healthcheck.sh --connect --innodb_initialized' \
+            --health-interval 3s --health-timeout 5s --health-retries 20 \
+            "${DB_IMAGE}"
+
+          status=unknown
+          for _ in $(seq 1 40); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' "${DB_CONTAINER}")
+            if [[ "${status}" == "healthy" ]]; then
+              break
+            fi
+            sleep 3
+          done
+
+          if [[ "${status}" != "healthy" ]]; then
+            echo "error: database never became healthy (status: ${status})" >&2
+            docker logs "${DB_CONTAINER}" 2>&1 | tail -n 40
+            exit 1
+          fi
+
+      # WP_HOME is https because that is how the site runs in production
+      # (Cloudflare/ingress terminate TLS and forward plain HTTP), and the
+      # request assertions below reproduce both sides of that: the ingress hop
+      # on port 80 and the in-container loopback on 443.
+      - name: Start the container
+        run: |
+          set -euo pipefail
+
+          docker run -d --name "${APP_CONTAINER}" --network "${NETWORK}" \
+            -e SITE_NAME="${SITE_NAME}" \
+            -e WP_ENV=production \
+            -e WP_HOME="https://${SITE_NAME}" \
+            -e WP_SITEURL="https://${SITE_NAME}/wp" \
+            -e DB_HOST="${DB_CONTAINER}" \
+            -e DB_NAME="${DB_NAME}" \
+            -e DB_USER="${DB_USER}" \
+            -e DB_PASSWORD="${DB_PASSWORD}" \
+            "${IMAGE}"
+
+          # The telemetry port is served by Apache alone, so it answers before
+          # WordPress is installed and makes a clean readiness signal.
+          ready=no
           for _ in $(seq 1 30); do
-            if docker exec bedrock_validate curl -s -o /dev/null http://127.0.0.1/; then
+            if docker exec "${APP_CONTAINER}" \
+              curl -fsS -o /dev/null 'http://127.0.0.1:8081/server-status?auto'; then
+              ready=yes
               break
             fi
             sleep 2
@@ -79,9 +157,49 @@ jobs:
           # in the entrypoint output, and re-running the job to get it back is
           # slow.
           echo "== container startup log =="
-          docker logs bedrock_validate 2>&1 | tail -n 40
+          docker logs "${APP_CONTAINER}" 2>&1 | tail -n 40
+
+          if [[ "${ready}" != "yes" ]]; then
+            echo "error: Apache never answered on the telemetry port" >&2
+            exit 1
+          fi
+
+      # install.php step 2 takes a plain form POST and needs no nonce, which
+      # avoids shipping wp-cli in the image purely for this workflow. A real
+      # install is what lets the checks below demand 200 and a rendered page
+      # instead of tolerating WordPress's database error.
+      - name: Install WordPress
+        run: |
+          set -euo pipefail
+
+          response=$(docker exec "${APP_CONTAINER}" curl -sS -w '\n%{http_code}' \
+            -X POST "https://${SITE_NAME}/wp/wp-admin/install.php?step=2" \
+            --data-urlencode "weblog_title=${WP_TITLE}" \
+            --data-urlencode 'user_name=validate_admin' \
+            --data-urlencode "admin_password=${WP_ADMIN_PASSWORD}" \
+            --data-urlencode "admin_password2=${WP_ADMIN_PASSWORD}" \
+            --data-urlencode 'pw_weak=1' \
+            --data-urlencode 'admin_email=validate@example.invalid' \
+            --data-urlencode 'blog_public=0' \
+            --data-urlencode 'language=')
+
+          code=${response##*$'\n'}
+          body=${response%$'\n'*}
+          echo "install.php -> ${code}"
+
+          if [[ "${code}" != "200" ]] \
+            || ! grep -qF 'WordPress has been installed' <<< "${body}"; then
+            echo "error: WordPress install did not succeed" >&2
+            tail -n 40 <<< "${body}" >&2
+            exit 1
+          fi
+
+      - name: Inspect the running container
+        run: |
+          set -euo pipefail
+
           echo "== processes =="
-          docker exec bedrock_validate sh -c '
+          docker exec "${APP_CONTAINER}" sh -c '
             for cmdline in /proc/[0-9]*/cmdline; do
               printf "%s: " "${cmdline%/cmdline}"
               tr "\000" " " < "${cmdline}"
@@ -89,23 +207,23 @@ jobs:
             done
           '
           echo "== /var/log/apache2 =="
-          docker exec bedrock_validate ls -la /var/log/apache2/
+          docker exec "${APP_CONTAINER}" ls -la /var/log/apache2/
 
           echo "== apache configuration =="
-          docker exec bedrock_validate apache2ctl -t
-          docker exec bedrock_validate apache2ctl -M | grep -E 'rewrite|headers|ssl|php'
+          docker exec "${APP_CONTAINER}" apache2ctl -t
+          docker exec "${APP_CONTAINER}" apache2ctl -M | grep -E 'rewrite|headers|ssl|php'
 
           # PromPress keeps its Prometheus counters in Redis and disables
           # itself with nothing but an admin notice when the PECL extension is
           # missing. Without this check, dropping it from the Dockerfile's
           # extension list would surface only as silently absent metrics.
-          docker exec bedrock_validate php -m | grep -x redis
+          docker exec "${APP_CONTAINER}" php -m | grep -x redis
 
           # Architecture contract: Apache/mod_php is the only server runtime.
           # These binaries were present in the old image and would indicate a
           # partial migration if they reappeared.
           for binary in nginx php-fpm supervisord; do
-            if docker exec bedrock_validate sh -c "command -v ${binary}"; then
+            if docker exec "${APP_CONTAINER}" sh -c "command -v ${binary}"; then
               echo "error: obsolete runtime still installed: ${binary}" >&2
               exit 1
             fi
@@ -113,134 +231,248 @@ jobs:
 
           # Verify the active config, not just the checked-in source: errors
           # must reach container stderr and access files must be bounded.
-          apache_config=$(docker exec bedrock_validate apache2ctl -t -D DUMP_RUN_CFG 2>&1)
+          apache_config=$(docker exec "${APP_CONTAINER}" apache2ctl -t -D DUMP_RUN_CFG 2>&1)
           printf '%s\n' "${apache_config}"
           grep -F 'ErrorLog: "/proc/self/fd/2"' <<< "${apache_config}"
-          docker exec bedrock_validate apache2ctl -t -D DUMP_VHOSTS 2>&1 \
+          docker exec "${APP_CONTAINER}" apache2ctl -t -D DUMP_VHOSTS 2>&1 \
             | grep -F '127.0.0.1:8081'
-          docker exec bedrock_validate apache2ctl -t -D DUMP_VHOSTS 2>&1 \
+          docker exec "${APP_CONTAINER}" apache2ctl -t -D DUMP_VHOSTS 2>&1 \
             | grep -F ':9118'
-          docker exec bedrock_validate grep -F \
+          docker exec "${APP_CONTAINER}" grep -F \
             'rotatelogs -f -n 3 /var/log/apache2/access.log 50M' \
             /etc/apache2/sites-enabled/bedrock.conf
 
+      # Every assertion names the status it expects. There is deliberately no
+      # "any response will do" mode: that is what let a site returning 500 pass
+      # as a successful validation.
+      - name: Check HTTP responses
+        run: |
+          set -euo pipefail
+
           check() {
-            local desc=$1 url=$2 expected=$3
+            local desc=$1 expected=$2
+            shift 2
             local code
-            code=$(docker exec bedrock_validate \
-              curl -s -o /dev/null -w '%{http_code}' "${url}" || true)
-            echo "${desc}: ${url} -> ${code}"
-            if [[ "${code}" == "000" ]]; then
-              echo "error: no response from ${url}" >&2
-              exit 1
-            fi
-            if [[ -n "${expected}" && "${code}" != "${expected}" ]]; then
-              echo "error: expected ${expected} from ${url}, got ${code}" >&2
+            code=$(docker exec "${APP_CONTAINER}" \
+              curl -s -o /dev/null -w '%{http_code}' "$@" || true)
+            echo "${desc}: expected ${expected}, got ${code:-no response}"
+            if [[ "${code}" != "${expected}" ]]; then
+              echo "error: ${desc}: expected HTTP ${expected}, got ${code:-no response}" >&2
               exit 1
             fi
           }
 
-          # Front door used by Cloudflare/ingress.
-          check "http front door" "http://127.0.0.1/" ""
+          # Front door used by Cloudflare/ingress: plain HTTP on port 80 with
+          # the public host name and the forwarded scheme the ingress sets.
+          # Without those headers WordPress answers with a canonical redirect
+          # to WP_HOME rather than serving the page.
+          check "http front door" 200 \
+            -H "Host: ${SITE_NAME}" -H 'X-Forwarded-Proto: https' 'http://127.0.0.1/'
           # Loopback path: verifies the generated certificate is trusted
           # in-container and that SITE_NAME resolves back to Apache. curl is
           # intentionally not given -k here.
-          check "https loopback" "https://${SITE_NAME}/" ""
-          # PHP must never execute from the uploads volume.
-          check "uploads php denied" "http://127.0.0.1/app/uploads/probe.php" "403"
-          # mod_status must not be reachable on the ingress-facing vhost.
-          check "server-status not public" "http://127.0.0.1/server-status" "403"
+          check "https loopback" 200 "https://${SITE_NAME}/"
+          # PHP must never execute from the uploads volume: 403 is the pass
+          # condition here, not a failure being tolerated.
+          check "uploads php denied" 403 'http://127.0.0.1/app/uploads/probe.php'
+          # mod_status must not be reachable on the ingress-facing vhost, so
+          # 403 is again the expected answer.
+          check "server-status not public" 403 'http://127.0.0.1/server-status'
 
-          # PromPress's REST routes must not be reachable on it either:
+          # PromPress's REST routes must not be reachable there either:
           # /metrics is unauthenticated unless a token is set in wp-admin, and
           # /storage/wipe is registered with no permission callback at all, so
-          # a public route there would let anyone reset the counters.
-          check "prompress metrics not public" "http://127.0.0.1/wp-json/prompress/v1/metrics" "403"
-          check "prompress wipe not public" "http://127.0.0.1/wp-json/prompress/v1/storage/wipe" "403"
+          # an ingress-reachable route would let anyone reset the counters.
+          check "prompress metrics not public" 403 \
+            'http://127.0.0.1/wp-json/prompress/v1/metrics'
+          check "prompress wipe not public" 403 \
+            'http://127.0.0.1/wp-json/prompress/v1/storage/wipe'
 
           # The dedicated metrics listener serves that one route and denies
-          # everything else. The route itself needs a database and Redis, so
-          # only the listener being up and the catch-all deny holding are
-          # asserted here - not the route's status code.
-          check "prompress listener catch-all denied" "http://127.0.0.1:9118/" "403"
-          check "prompress listener up" "http://127.0.0.1:9118/wp-json/prompress/v1/metrics" ""
+          # everything else.
+          check "prompress listener catch-all denied" 403 'http://127.0.0.1:9118/'
+          # 404 rather than 403, and that distinction is the whole point: the
+          # plugin ships in the image but a fresh install leaves it
+          # deactivated, so WordPress has no such REST route to answer with.
+          # Getting past the deny at all is what proves the vhost's re-allow
+          # overrides the server-scope rule - the one piece of Apache
+          # section-merge behaviour this listener depends on. Same headers as
+          # the front door, so WordPress serves rather than canonical-redirects.
+          check "prompress metrics listener allowed" 404 \
+            -H "Host: ${SITE_NAME}" -H 'X-Forwarded-Proto: https' \
+            'http://127.0.0.1:9118/wp-json/prompress/v1/metrics'
 
           # Telemetry endpoint the Prometheus exporter sidecar scrapes.
-          echo "== mod_status =="
-          check "telemetry endpoint" "http://127.0.0.1:8081/server-status?auto" "200"
-          docker exec bedrock_validate \
-            curl -sS "http://127.0.0.1:8081/server-status?auto" | grep -E '^(BusyWorkers|Total Accesses):'
+          check "telemetry endpoint" 200 'http://127.0.0.1:8081/server-status?auto'
 
-          # Logging contract: access lines land in the rotating file, errors
-          # (Apache and PHP alike) land on the container's stderr. This
-          # container runs with the default ACCESS_LOG (on).
+          # A 200 alone does not prove the site rendered: a fatal error after
+          # the headers, or a white screen, keeps the status code.
           #
-          # The regular-file check is deliberate: the base image ships
-          # /var/log/apache2/access.log as a symlink to /dev/stdout, and the
-          # Dockerfile removes it. If it ever comes back, rotatelogs writes to
-          # the container's stdout instead and `test -s` fails on a character
-          # device with no explanation, so name that failure here.
-          echo "== access log =="
-          docker exec bedrock_validate ls -la /var/log/apache2/
-          if ! docker exec bedrock_validate test -f /var/log/apache2/access.log; then
-            echo "error: /var/log/apache2/access.log is not a regular file" >&2
-            docker exec bedrock_validate readlink -f /var/log/apache2/access.log || true
+          # Here strings rather than `printf ... | head`: `head` closes the
+          # pipe early, which makes the writer exit 141 and - with pipefail -
+          # fails the step for no reason.
+          echo "== front page =="
+          front_page=$(docker exec "${APP_CONTAINER}" curl -sS "https://${SITE_NAME}/")
+          if ! grep -qF "<title>${WP_TITLE}</title>" <<< "${front_page}"; then
+            echo "error: front page did not render the expected WordPress output" >&2
+            head -n 40 <<< "${front_page}" >&2
             exit 1
           fi
-          if ! docker exec bedrock_validate test -s /var/log/apache2/access.log; then
-            echo "error: access log is empty despite serving requests" >&2
-            docker exec bedrock_validate sh -c \
-              'grep -aH "[r]otatelogs" /proc/[0-9]*/cmdline' || \
-              echo "error: no rotatelogs child is running" >&2
-            exit 1
-          fi
-          docker exec bedrock_validate tail -n 3 /var/log/apache2/access.log
+          head -n 10 <<< "${front_page}"
 
-          # Access lines must not also be on stdout: that is what the removed
-          # symlink used to cause, and it makes the container log unusable.
-          if docker logs bedrock_validate 2>/dev/null | grep -q 'GET / HTTP/1.1"'; then
-            echo "error: access lines are being written to container stdout" >&2
-            exit 1
-          fi
+          echo "== mod_status =="
+          docker exec "${APP_CONTAINER}" \
+            curl -sS 'http://127.0.0.1:8081/server-status?auto' \
+            | grep -E '^(BusyWorkers|Total Accesses):'
 
-          if [[ -z "$(docker logs bedrock_validate 2>&1)" ]]; then
+      # Errors are routed to the container's error stream on purpose, so a run
+      # that serves 200s while logging PHP errors is still a failed run.
+      - name: Check the error stream
+        run: |
+          set -euo pipefail
+
+          log=$(docker logs "${APP_CONTAINER}" 2>&1)
+
+          if [[ -z "${log}" ]]; then
             echo "error: container produced no log output" >&2
             exit 1
           fi
 
-          # Signals must reach PID 1 now that supervisord is gone.
-          docker stop --timeout 20 bedrock_validate
+          # Reported but not fatal: a new PHP release deprecating an API used
+          # by WordPress or a plugin is worth seeing on the Renovate branch,
+          # but it does not mean the image cannot serve.
+          deprecations=$(grep -E 'PHP (Deprecated|Notice):' <<< "${log}" || true)
+          if [[ -n "${deprecations}" ]]; then
+            echo "::warning::PHP deprecation/notice messages in the container log"
+            printf '%s\n' "${deprecations}"
+          fi
 
-          # ACCESS_LOG=off must actually suppress the in-container access log
-          # (and the rotatelogs child) while the container still serves.
-          echo "== access log disabled =="
-          docker run -d --name bedrock_validate_nolog -e SITE_NAME="${SITE_NAME}" \
-            -e ACCESS_LOG=off bedrock_website:validate
+          errors=$(grep -E 'PHP (Fatal error|Parse error|Warning):' <<< "${log}" || true)
+          if [[ -n "${errors}" ]]; then
+            echo "error: the container logged PHP errors while serving:" >&2
+            printf '%s\n' "${errors}" >&2
+            exit 1
+          fi
+
+      # Logging contract: access lines land in the rotating file, errors
+      # (Apache and PHP alike) land on the container's stderr. This container
+      # runs with the default ACCESS_LOG (on).
+      #
+      # The regular-file check is deliberate: the base image ships
+      # /var/log/apache2/access.log as a symlink to /dev/stdout, and the
+      # Dockerfile removes it. If it ever comes back, rotatelogs writes to the
+      # container's stdout instead and `test -s` fails on a character device
+      # with no explanation, so name that failure here.
+      - name: Check the access log
+        run: |
+          set -euo pipefail
+
+          docker exec "${APP_CONTAINER}" ls -la /var/log/apache2/
+          if ! docker exec "${APP_CONTAINER}" test -f /var/log/apache2/access.log; then
+            echo "error: /var/log/apache2/access.log is not a regular file" >&2
+            docker exec "${APP_CONTAINER}" readlink -f /var/log/apache2/access.log || true
+            exit 1
+          fi
+          if ! docker exec "${APP_CONTAINER}" test -s /var/log/apache2/access.log; then
+            echo "error: access log is empty despite serving requests" >&2
+            docker exec "${APP_CONTAINER}" sh -c \
+              'grep -aH "[r]otatelogs" /proc/[0-9]*/cmdline' || \
+              echo "error: no rotatelogs child is running" >&2
+            exit 1
+          fi
+          docker exec "${APP_CONTAINER}" tail -n 3 /var/log/apache2/access.log
+
+          # Access lines must not also be on stdout: that is what the removed
+          # symlink used to cause, and it makes the container log unusable.
+          if docker logs "${APP_CONTAINER}" 2>/dev/null | grep -q 'GET / HTTP/1.1"'; then
+            echo "error: access lines are being written to container stdout" >&2
+            exit 1
+          fi
+
+      # Signals must reach PID 1 now that supervisord is gone. A container that
+      # ignores SIGTERM is killed once the timeout expires and exits 137, so
+      # the exit code - not the fact that `docker stop` returned - is the
+      # assertion.
+      - name: Check shutdown handling
+        run: |
+          set -euo pipefail
+
+          docker stop --timeout 20 "${APP_CONTAINER}"
+          exit_code=$(docker inspect -f '{{.State.ExitCode}}' "${APP_CONTAINER}")
+          echo "exit code after SIGTERM: ${exit_code}"
+          if [[ "${exit_code}" != "0" ]]; then
+            echo "error: container did not shut down cleanly on SIGTERM" >&2
+            exit 1
+          fi
+
+      # ACCESS_LOG=off must actually suppress the in-container access log (and
+      # the rotatelogs child) while the container still serves.
+      - name: Check ACCESS_LOG=off
+        run: |
+          set -euo pipefail
+
+          docker run -d --name "${NOLOG_CONTAINER}" --network "${NETWORK}" \
+            -e SITE_NAME="${SITE_NAME}" \
+            -e ACCESS_LOG=off \
+            -e WP_ENV=production \
+            -e WP_HOME="https://${SITE_NAME}" \
+            -e WP_SITEURL="https://${SITE_NAME}/wp" \
+            -e DB_HOST="${DB_CONTAINER}" \
+            -e DB_NAME="${DB_NAME}" \
+            -e DB_USER="${DB_USER}" \
+            -e DB_PASSWORD="${DB_PASSWORD}" \
+            "${IMAGE}"
+
+          ready=no
           for _ in $(seq 1 30); do
-            if docker exec bedrock_validate_nolog curl -s -o /dev/null http://127.0.0.1/; then
+            if docker exec "${NOLOG_CONTAINER}" \
+              curl -fsS -o /dev/null 'http://127.0.0.1:8081/server-status?auto'; then
+              ready=yes
               break
             fi
             sleep 2
           done
-          if docker exec bedrock_validate_nolog test -e /var/log/apache2/access.log; then
-            echo "error: access log written despite ACCESS_LOG=off" >&2
-            docker exec bedrock_validate_nolog ls -la /var/log/apache2/ || true
+          if [[ "${ready}" != "yes" ]]; then
+            echo "error: Apache never answered with ACCESS_LOG=off" >&2
+            docker logs "${NOLOG_CONTAINER}" 2>&1 | tail -n 40
             exit 1
           fi
-          if docker exec bedrock_validate_nolog sh -c \
+
+          # Serving is what creates access lines, so request the site (against
+          # the database the first container installed) before asserting that
+          # none were written.
+          code=$(docker exec "${NOLOG_CONTAINER}" \
+            curl -s -o /dev/null -w '%{http_code}' \
+            -H "Host: ${SITE_NAME}" -H 'X-Forwarded-Proto: https' \
+            'http://127.0.0.1/' || true)
+          echo "http front door (ACCESS_LOG=off): expected 200, got ${code:-no response}"
+          if [[ "${code}" != "200" ]]; then
+            echo "error: site does not serve with ACCESS_LOG=off" >&2
+            exit 1
+          fi
+
+          if docker exec "${NOLOG_CONTAINER}" test -e /var/log/apache2/access.log; then
+            echo "error: access log written despite ACCESS_LOG=off" >&2
+            docker exec "${NOLOG_CONTAINER}" ls -la /var/log/apache2/ || true
+            exit 1
+          fi
+          if docker exec "${NOLOG_CONTAINER}" sh -c \
             'grep -aql "[r]otatelogs" /proc/[0-9]*/cmdline'; then
             echo "error: rotatelogs still running despite ACCESS_LOG=off" >&2
             exit 1
           fi
-          docker stop --timeout 20 bedrock_validate_nolog
+          docker stop --timeout 20 "${NOLOG_CONTAINER}"
 
-      # Runs only when the smoke test failed: `set -e` aborts that step at the
-      # first bad assertion, so the state that explains it (container log,
-      # process tree, log directory, live vhost dump) is otherwise lost.
+      # Runs only when a check failed: `set -e` aborts that step at the first
+      # bad assertion, so the state that explains it (container log, process
+      # tree, log directory, live vhost dump) is otherwise lost.
       - name: Container diagnostics
         if: failure()
         run: |
-          for container in bedrock_validate bedrock_validate_nolog; do
+          echo "===== ${DB_CONTAINER}: log (last 50 lines) ====="
+          docker logs --tail 50 "${DB_CONTAINER}" 2>&1 || true
+
+          for container in "${APP_CONTAINER}" "${NOLOG_CONTAINER}"; do
             docker inspect "${container}" >/dev/null 2>&1 || continue
             echo "===== ${container}: state ====="
             docker inspect \
@@ -261,14 +493,18 @@ jobs:
             echo "===== ${container}: vhosts ====="
             docker exec "${container}" apache2ctl -S || true
             echo "===== ${container}: front door, verbose ====="
-            docker exec "${container}" curl -sSv -o /dev/null http://127.0.0.1/ || true
+            docker exec "${container}" curl -sSv -o /dev/null \
+              -H "Host: ${SITE_NAME}" -H 'X-Forwarded-Proto: https' \
+              http://127.0.0.1/ || true
           done
 
       - name: Container cleanup
         if: always()
         run: |
-          docker rm -f bedrock_validate || true
-          docker rm -f bedrock_validate_nolog || true
+          docker rm -f "${APP_CONTAINER}" || true
+          docker rm -f "${NOLOG_CONTAINER}" || true
+          docker rm -f "${DB_CONTAINER}" || true
+          docker network rm "${NETWORK}" || true
 
       - name: Images cleanup
         if: always()

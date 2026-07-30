@@ -19,6 +19,25 @@ set -euo pipefail
 SITE_NAME="${SITE_NAME:-localhost}"
 export SITE_NAME
 
+# In-container access logging is opt-out: the ingress already produces the
+# external access log, so a deployment that does not need the local copy can
+# set ACCESS_LOG=off and avoid both the disk use and the rotatelogs child.
+# Apache config cannot branch on an environment variable, so the value is
+# turned into a define that <IfDefine ACCESS_LOG> in bedrock.conf keys on.
+APACHE_ARGS=()
+case "${ACCESS_LOG:-on}" in
+  [Oo][Nn] | [Tt][Rr][Uu][Ee] | 1 | [Yy][Ee][Ss])
+    APACHE_ARGS+=(-D ACCESS_LOG)
+    ;;
+  [Oo][Ff][Ff] | [Ff][Aa][Ll][Ss][Ee] | 0 | [Nn][Oo])
+    ;;
+  *)
+    # Unrecognised values keep logging rather than silently dropping it.
+    echo "run.sh: warning: unrecognised ACCESS_LOG='${ACCESS_LOG}', keeping access logging on"
+    APACHE_ARGS+=(-D ACCESS_LOG)
+    ;;
+esac
+
 CERT_DIR=/etc/ssl/bedrock
 CA_CERT=/usr/local/share/ca-certificates/bedrock-loopback.crt
 
@@ -60,7 +79,10 @@ if ! grep -qE "[[:space:]]${SITE_NAME}([[:space:]]|$)" /etc/hosts; then
     || echo "run.sh: warning: could not add ${SITE_NAME} to /etc/hosts"
 fi
 
-# Fail fast on a broken vhost instead of crash-looping inside Apache.
-apache2ctl -t
+# Fail fast on a broken vhost instead of crash-looping inside Apache. The same
+# defines are passed here as to the server below, so the config is validated
+# exactly as it will be loaded.
+apache2ctl -t "${APACHE_ARGS[@]}"
 
-exec apache2-foreground
+# apache2-foreground forwards its arguments to apache2.
+exec apache2-foreground "${APACHE_ARGS[@]}"

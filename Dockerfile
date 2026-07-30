@@ -81,11 +81,20 @@ RUN curl -sL https://deb.nodesource.com/setup_20.x | bash \
 # status: the mod_status endpoint a Prometheus exporter sidecar scrapes.
 # Everything else (MPM, keep-alive, process recycling) stays at upstream
 # defaults - avoiding bespoke tuning is the point of this image layout.
+# The last line removes a symlink the base image creates: it points
+# /var/log/apache2/access.log at /dev/stdout so the stock vhost's access log
+# shows up in `docker logs`. This image logs *errors* to stderr and access lines
+# to a rotatelogs-managed file at that same path, so the symlink has to go -
+# left in place, rotatelogs writes every request onto the container's stdout,
+# the 3x50M cap silently never applies (a character device never grows), and the
+# file looks present even when ACCESS_LOG=off. Symptom when it regressed: the
+# validation workflow failed on `test -s /var/log/apache2/access.log`.
 COPY ./build/apache/bedrock.conf /etc/apache2/sites-available/bedrock.conf
 RUN a2enmod rewrite headers ssl status \
   && a2dissite 000-default \
   && a2ensite bedrock \
-  && a2disconf other-vhosts-access-log
+  && a2disconf other-vhosts-access-log \
+  && rm -f /var/log/apache2/access.log
 
 COPY ./build/bin/run.sh /run.sh
 COPY ./build/php/php.ini /usr/local/etc/php/conf.d/php.ini

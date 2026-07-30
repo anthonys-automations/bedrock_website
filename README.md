@@ -82,7 +82,14 @@ Apache configuration lives in [build/apache/bedrock.conf](build/apache/bedrock.c
   The k8s ingress remains the source of external access logs, so this file is
   for in-container inspection (`docker exec <container> tail -f
   /var/log/apache2/access.log`) and is lost when the container is replaced.
-  Mount `/var/log/apache2` if it needs to outlive the container.
+  Mount `/var/log/apache2` if it needs to outlive the container. The
+  `php:<version>-apache` base image symlinks that path to `/dev/stdout`; the
+  [Dockerfile](Dockerfile) deletes the symlink so it is a real, rotated file and
+  access lines stay out of the error stream.
+  Set the `ACCESS_LOG` container variable to `off` (also accepted: `false`,
+  `0`, `no`) to disable this local copy entirely - no file is written and no
+  `rotatelogs` child is started. It defaults to `on`, and an unrecognised value
+  logs a warning and keeps logging on. Error logging is not affected.
 
 ### Telemetry
 

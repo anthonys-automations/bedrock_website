@@ -73,6 +73,24 @@ jobs:
             sleep 2
           done
 
+          # Startup trace. Printed unconditionally (not only on failure)
+          # because most regressions here - a base image change, a failed
+          # certificate step, a piped logger that would not spawn - are visible
+          # in the entrypoint output, and re-running the job to get it back is
+          # slow.
+          echo "== container startup log =="
+          docker logs bedrock_validate 2>&1 | tail -n 40
+          echo "== processes =="
+          docker exec bedrock_validate sh -c '
+            for cmdline in /proc/[0-9]*/cmdline; do
+              printf "%s: " "${cmdline%/cmdline}"
+              tr "\000" " " < "${cmdline}"
+              printf "\n"
+            done
+          '
+          echo "== /var/log/apache2 =="
+          docker exec bedrock_validate ls -la /var/log/apache2/
+
           echo "== apache configuration =="
           docker exec bedrock_validate apache2ctl -t
           docker exec bedrock_validate apache2ctl -M | grep -E 'rewrite|headers|ssl|php'
@@ -132,10 +150,36 @@ jobs:
             curl -sS "http://127.0.0.1:8081/server-status?auto" | grep -E '^(BusyWorkers|Total Accesses):'
 
           # Logging contract: access lines land in the rotating file, errors
-          # (Apache and PHP alike) land on the container's stderr.
+          # (Apache and PHP alike) land on the container's stderr. This
+          # container runs with the default ACCESS_LOG (on).
+          #
+          # The regular-file check is deliberate: the base image ships
+          # /var/log/apache2/access.log as a symlink to /dev/stdout, and the
+          # Dockerfile removes it. If it ever comes back, rotatelogs writes to
+          # the container's stdout instead and `test -s` fails on a character
+          # device with no explanation, so name that failure here.
           echo "== access log =="
-          docker exec bedrock_validate test -s /var/log/apache2/access.log
+          docker exec bedrock_validate ls -la /var/log/apache2/
+          if ! docker exec bedrock_validate test -f /var/log/apache2/access.log; then
+            echo "error: /var/log/apache2/access.log is not a regular file" >&2
+            docker exec bedrock_validate readlink -f /var/log/apache2/access.log || true
+            exit 1
+          fi
+          if ! docker exec bedrock_validate test -s /var/log/apache2/access.log; then
+            echo "error: access log is empty despite serving requests" >&2
+            docker exec bedrock_validate sh -c \
+              'grep -aH "[r]otatelogs" /proc/[0-9]*/cmdline' || \
+              echo "error: no rotatelogs child is running" >&2
+            exit 1
+          fi
           docker exec bedrock_validate tail -n 3 /var/log/apache2/access.log
+
+          # Access lines must not also be on stdout: that is what the removed
+          # symlink used to cause, and it makes the container log unusable.
+          if docker logs bedrock_validate 2>/dev/null | grep -q 'GET / HTTP/1.1"'; then
+            echo "error: access lines are being written to container stdout" >&2
+            exit 1
+          fi
 
           if [[ -z "$(docker logs bedrock_validate 2>&1)" ]]; then
             echo "error: container produced no log output" >&2
@@ -145,10 +189,64 @@ jobs:
           # Signals must reach PID 1 now that supervisord is gone.
           docker stop --timeout 20 bedrock_validate
 
+          # ACCESS_LOG=off must actually suppress the in-container access log
+          # (and the rotatelogs child) while the container still serves.
+          echo "== access log disabled =="
+          docker run -d --name bedrock_validate_nolog -e SITE_NAME="${SITE_NAME}" \
+            -e ACCESS_LOG=off bedrock_website:validate
+          for _ in $(seq 1 30); do
+            if docker exec bedrock_validate_nolog curl -s -o /dev/null http://127.0.0.1/; then
+              break
+            fi
+            sleep 2
+          done
+          if docker exec bedrock_validate_nolog test -e /var/log/apache2/access.log; then
+            echo "error: access log written despite ACCESS_LOG=off" >&2
+            docker exec bedrock_validate_nolog ls -la /var/log/apache2/ || true
+            exit 1
+          fi
+          if docker exec bedrock_validate_nolog sh -c \
+            'grep -aql "[r]otatelogs" /proc/[0-9]*/cmdline'; then
+            echo "error: rotatelogs still running despite ACCESS_LOG=off" >&2
+            exit 1
+          fi
+          docker stop --timeout 20 bedrock_validate_nolog
+
+      # Runs only when the smoke test failed: `set -e` aborts that step at the
+      # first bad assertion, so the state that explains it (container log,
+      # process tree, log directory, live vhost dump) is otherwise lost.
+      - name: Container diagnostics
+        if: failure()
+        run: |
+          for container in bedrock_validate bedrock_validate_nolog; do
+            docker inspect "${container}" >/dev/null 2>&1 || continue
+            echo "===== ${container}: state ====="
+            docker inspect \
+              -f 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' \
+              "${container}" || true
+            echo "===== ${container}: log (stdout+stderr, last 200 lines) ====="
+            docker logs --tail 200 "${container}" 2>&1 || true
+            echo "===== ${container}: processes ====="
+            docker exec "${container}" sh -c '
+              for cmdline in /proc/[0-9]*/cmdline; do
+                printf "%s: " "${cmdline%/cmdline}"
+                tr "\000" " " < "${cmdline}"
+                printf "\n"
+              done
+            ' || true
+            echo "===== ${container}: /var/log/apache2 ====="
+            docker exec "${container}" ls -la /var/log/apache2/ || true
+            echo "===== ${container}: vhosts ====="
+            docker exec "${container}" apache2ctl -S || true
+            echo "===== ${container}: front door, verbose ====="
+            docker exec "${container}" curl -sSv -o /dev/null http://127.0.0.1/ || true
+          done
+
       - name: Container cleanup
         if: always()
         run: |
           docker rm -f bedrock_validate || true
+          docker rm -f bedrock_validate_nolog || true
 
       - name: Images cleanup
         if: always()

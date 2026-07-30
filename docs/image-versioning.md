@@ -181,6 +181,16 @@ Three things about that setup are easy to get wrong:
   structured log that no error-level record was written and the repository
   result is `done`.
 
+Everything Renovate may actually branch — the Dockerfile base image and the
+chart's sidecar images — is grouped into a single `renovate/all-dependencies`
+branch and pull request, so a run costs one validation build and one merge
+instead of one per dependency. `separateMajorMinor: false` keeps major updates
+in that same branch rather than splitting them off into their own. The group
+names its managers explicitly instead of matching everything: `github-actions`
+has to stay outside it, because `GITHUB_TOKEN` cannot push under
+`.github/workflows` and one such change in a shared branch would block every
+other update travelling with it.
+
 `bedrock/composer.json` is intentionally left unmanaged: its requirements are
 open `>0` constraints with no committed lock file, so the weekly rebuild already
 picks up new plugin releases and the calendar version makes that visible.

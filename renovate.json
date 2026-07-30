@@ -11,6 +11,7 @@
   "platformAutomerge": false,
   "prCreation": "immediate",
   "rebaseWhen": "behind-base-branch",
+  "separateMajorMinor": false,
   "labels": [
     "dependencies"
   ],
@@ -21,6 +22,14 @@
     ]
   },
   "packageRules": [
+    {
+      "description": "Everything actionable lands in one branch/PR, so a run produces a single validate-build.yml dispatch and a single merge rather than one per dependency. The managers are listed explicitly instead of grouping '*': github-actions must stay out of the group because GITHUB_TOKEN cannot push under .github/workflows, and a grouped branch containing such a change would fail for every other update in it too. Combined with the top-level 'separateMajorMinor: false', which stops Renovate splitting major updates into their own branch, this yields exactly one renovate/* branch per run.",
+      "matchManagers": [
+        "dockerfile",
+        "kubernetes"
+      ],
+      "groupName": "all dependencies"
+    },
     {
       "description": "Bump the pinned PHP base image in the Dockerfile. A merged bump is published by the next image_build.yml run as a new immutable calendar version, which is what deployments then move to.",
       "matchManagers": [

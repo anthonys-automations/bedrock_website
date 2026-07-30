@@ -28,6 +28,9 @@ name: Validate Image Build
 
 on:
   workflow_dispatch:
+  # Lets release.yml gate the published build on this same smoke test,
+  # instead of the two pipelines drifting into separate checks.
+  workflow_call:
 
 permissions:
   contents: read

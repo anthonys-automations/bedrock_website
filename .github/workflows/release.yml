@@ -14,7 +14,15 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Same build-and-smoke-test validate-build.yml runs on Renovate branches,
+  # run here so a push straight to dev/main (bypassing that Renovate check)
+  # can't publish an image that builds but no longer serves.
+  validate:
+    name: "Validate image"
+    uses: ./.github/workflows/validate-build.yml
+
   image_build:
     name: "Build image"
+    needs: validate
     uses: ./.github/workflows/image_build.yml
     secrets: inherit

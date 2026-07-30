@@ -191,6 +191,16 @@ has to stay outside it, because `GITHUB_TOKEN` cannot push under
 `.github/workflows` and one such change in a shared branch would block every
 other update travelling with it.
 
+`prHourlyLimit` is set to `0` (off) rather than left at its default of `2`.
+That default counts every PR opened in the current clock hour — including ones
+already closed, such as the per-dependency PRs that were pruned when this
+config moved to a single group. Once the limit is reached Renovate still
+creates the branch but silently skips the PR, and because that is a
+`debug`-level event an `info`-level run shows only `Branch created` and the
+workflow's log assertions still pass. If a branch ever exists without a PR
+again, check the Dependency Dashboard: rate-limited updates are listed there
+with a checkbox that forces creation.
+
 `bedrock/composer.json` is intentionally left unmanaged: its requirements are
 open `>0` constraints with no committed lock file, so the weekly rebuild already
 picks up new plugin releases and the calendar version makes that visible.

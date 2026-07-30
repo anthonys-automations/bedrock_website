@@ -1,4 +1,8 @@
-FROM php:8.2-fpm AS base
+# Pinned to an explicit PHP release instead of the floating `8.2-fpm` tag so
+# builds are reproducible and base image bumps are proposed and reviewed by
+# Renovate (see renovate.json / docs/image-versioning.md) rather than arriving
+# silently on the next rebuild.
+FROM php:8.2.32-fpm AS base
 LABEL name=bedrock
 LABEL intermediate=true
 
@@ -83,6 +87,16 @@ RUN cd /srv/bedrock \
   && mkdir /var/log/php \
   && chown www-data /var/log/php \
   && chmod +x /run.sh
+
+# Build-time provenance: the Git commit this image was built from, so a running
+# container can be traced back to source for audit (`docker exec <c> printenv
+# GIT_COMMIT`). Kept as an env var and not only as an OCI label so it is
+# readable from inside the container, and declared after the package/composer
+# layers so a new commit does not invalidate them. Treat it as best-effort: it
+# is only accurate for builds made from a clean working tree, and the immutable
+# image digest remains the authoritative audit record.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
 
 WORKDIR /srv/bedrock
 CMD ["/run.sh"]

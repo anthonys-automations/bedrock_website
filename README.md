@@ -48,6 +48,21 @@ wp theme activate sage
 1. Copy `build` and `docker-compose.yml` into the root of an existing bedrock install.
 2. Edit `services.bedrock.volumes` in `docker-compose.yml` to reference the correct path. `./bedrock:/srv/bedrock` becomes `./:/srv/bedrock`.
 
+## Container images
+
+Published images use an immutable, architecture-scoped calendar version:
+
+```text
+anthonysautomations/bedrock_website:<YYYY>.<MM>.<DD>.<N>-<arch>
+```
+
+- `arm64` is built by CI (`.github/workflows/image_build.yml`) on push to `dev`/`main` and weekly.
+- `amd64` is built by hand with `./scripts/build-amd64.sh`.
+- `latest-<arch>` is a convenience alias only. **Never deploy it**, and note that the plain `latest` tag is no longer updated.
+- The pinned PHP base image is bumped automatically by Renovate (`.github/workflows/renovate.yml`, policy in `renovate.json`).
+
+See [docs/image-versioning.md](docs/image-versioning.md) for the full tag contract, provenance metadata and updater setup.
+
 ## Community
 
 Keep track of development and community news.

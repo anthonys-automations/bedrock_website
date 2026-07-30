@@ -12,8 +12,6 @@ jobs:
     name: "Build image"
     uses: ./.github/workflows/image_build.yml
     secrets: inherit
-    with: 
-      IMAGE_TAG: latest
 
   deploy_stg:
     name: "Container deployment"
@@ -22,5 +20,10 @@ jobs:
     needs: image_build
     with:
       ENV_NAME: mountainofwonders_stg
-      IMAGE_TAG: latest
+      # Deploy the immutable, architecture-scoped tag this run just allocated.
+      # The build no longer publishes a plain `latest`, and deploying a moving
+      # alias would defeat the whole point of the versioning scheme: there would
+      # be no record of which image is actually running and nothing to roll back
+      # to. See docs/image-versioning.md.
+      IMAGE_TAG: ${{ needs.image_build.outputs.tag }}
       PORT: 8080

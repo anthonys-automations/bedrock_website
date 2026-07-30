@@ -1,3 +1,29 @@
+# Builds and publishes the bedrock_website image for linux/arm64.
+#
+# Reworked to implement the calendar tag strategy described in
+# docs/image-versioning.md: deployments (and any downstream Renovate) need
+# releases that are immutable, sortable and architecture-scoped, which the old
+# `latest` + ISO-timestamp scheme did not provide.
+#
+# Tags published here:
+#   <YYYY>.<MM>.<DD>.<N>-arm64   immutable release, this is what deployments pin
+#   latest-arm64                 moving alias, convenience only - never deploy it
+#
+# The unsuffixed `latest` / version tags are deliberately NOT published by this
+# workflow. They are reserved for a promoted multi-architecture manifest, so a
+# host of another architecture can never be handed an arm64-only image. amd64
+# images are built by hand with scripts/build-amd64.sh, which allocates its own
+# version stream through the same scripts/next-version.sh.
+#
+# Package inventory is not queried from an independently pulled base image
+# before the build (that could drift from what actually gets installed, since
+# both the Debian package index and Packagist are mutable). Instead the build
+# enables a BuildKit SBOM attestation, which reflects the exact image that gets
+# pushed; inspect it with:
+#   docker buildx imagetools inspect --format '{{ json .SBOM }}' <repo>:<tag>
+#
+# Consumer Renovate configuration:
+#   # renovate: datasource=docker depName=anthonysautomations/bedrock_website versioning=regex:^(?<major>\d{4})\.(?<minor>\d{2})\.(?<patch>\d{2})\.(?<build>\d+)(?:-(?<compatibility>amd64|arm64))?$
 name: Image build pipeline
 
 on:
@@ -6,28 +32,50 @@ on:
       branch:
         required: false
         type: string
-      IMAGE_TAG:
-        required: true
-        type: string
+    outputs:
+      repo:
+        description: 'DockerHub repository the image was pushed to'
+        value: ${{ jobs.image_build.outputs.repo }}
+      version:
+        description: 'Allocated calendar version, without the architecture suffix'
+        value: ${{ jobs.image_build.outputs.version }}
+      tag:
+        description: 'Immutable release tag (version + architecture suffix) - deploy this one'
+        value: ${{ jobs.image_build.outputs.tag }}
   workflow_dispatch:
+
+  # Weekly rebuild: most releases carry no source change, what actually moves is
+  # the PHP base image, its Debian packages and the Composer dependencies
+  # resolved by `composer update` during the build. The calendar version is what
+  # makes each of those rebuilds visible to an updater.
+  schedule:
+    - cron: '0 2 * * 1'
 
 env:
   DOCKERHUB_REPO: anthonysautomations/bedrock_website
+  IMAGE_ARCH: arm64
 
 jobs:
   image_build:
     name: "${{ inputs.branch || github.ref }}"
     runs-on: ARM64
 
+    # Serialise builds per architecture so two runs on the same day cannot race
+    # for the same daily sequence number.
+    concurrency:
+      group: build-bedrock_website-arm64
+      cancel-in-progress: false
+
+    outputs:
+      repo: ${{ steps.version.outputs.repo }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
     steps:
       - name: Display Selected Branch
         run: |
           echo "Using branch: ${{ inputs.branch || github.ref }}"
 
-      - name: Generate ISO timestamp tag
-        id: timestamp
-        run: echo "tag=$(date -u +'%Y-%m-%dT%H-%M-%SZ')" >> $GITHUB_OUTPUT
-      
       - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
@@ -42,21 +90,57 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Resolve next release version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(./scripts/next-version.sh "${DOCKERHUB_REPO}" "${IMAGE_ARCH}")
+          echo "repo=${DOCKERHUB_REPO}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${version}-${IMAGE_ARCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Collect image metadata
+        id: meta
+        run: |
+          set -euo pipefail
+
+          # The PHP release is pinned in the Dockerfile, so read it straight
+          # from there rather than from a separately pulled base image, whose
+          # package index could have moved on since the build started.
+          php_version=$(sed -nE 's|^FROM php:([A-Za-z0-9._-]+).*|\1|p' Dockerfile)
+          php_version=${php_version%%$'\n'*}
+          if [[ -z "${php_version}" ]]; then
+            echo "error: could not determine the pinned PHP base image version" >&2
+            exit 1
+          fi
+
+          echo "php_version=${php_version}" >> "$GITHUB_OUTPUT"
+          echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
+          platforms: linux/arm64
           push: true
+          sbom: true
           tags: |
-            ${{ env.DOCKERHUB_REPO }}:latest
-            ${{ env.DOCKERHUB_REPO }}:${{ steps.timestamp.outputs.tag }}
-            ${{ env.DOCKERHUB_REPO }}:${{ inputs.IMAGE_TAG }}
-          # Add Git hash as image label for traceability
+            ${{ steps.version.outputs.repo }}:${{ steps.version.outputs.tag }}
+            ${{ steps.version.outputs.repo }}:latest-arm64
+          # Full provenance lives in labels and the SBOM: the tag stays short
+          # and sortable while the exact PHP base version and the installed
+          # package inventory (generated by BuildKit from the image that is
+          # actually pushed) remain inspectable.
           labels: |
+            org.opencontainers.image.title=bedrock_website
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          # Build arguments to embed Git hash in the image
+            org.opencontainers.image.created=${{ steps.meta.outputs.created }}
+            io.anthonysautomations.php.version=${{ steps.meta.outputs.php_version }}
+          # Bake the commit into the image itself (see the Dockerfile ARG) so it
+          # is traceable from inside a running container, not only via labels.
           build-args: |
             GIT_COMMIT=${{ github.sha }}
 
@@ -67,6 +151,13 @@ jobs:
       - name: Add build summary
         run: |
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository:** ${{ env.DOCKERHUB_REPO }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tags:** latest, ${{ steps.timestamp.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ steps.version.outputs.repo }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform:** linux/arm64" >> $GITHUB_STEP_SUMMARY
+          # Link straight to the published tag on DockerHub, so the artefact
+          # this run produced can be opened without hunting for it. Only the
+          # immutable release tag is linked: the moving alias is not deployable
+          # and points somewhere else by the time anyone reads this.
+          echo "- **Release tag:** [${{ steps.version.outputs.tag }}](https://hub.docker.com/layers/${{ steps.version.outputs.repo }}/${{ steps.version.outputs.tag }}/)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Moving alias:** latest-arm64" >> $GITHUB_STEP_SUMMARY
+          echo "- **PHP base image:** ${{ steps.meta.outputs.php_version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Git Hash:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

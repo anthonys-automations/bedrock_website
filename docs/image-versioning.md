@@ -152,7 +152,7 @@ offered an amd64 image.
 
 ## Keeping the base image current
 
-Pinning `php:8.2.32-fpm` removes silent drift, so an updater has to replace it.
+Pinning `php:8.2.32-apache` removes silent drift, so an updater has to replace it.
 [.github/workflows/renovate.yml](../.github/workflows/renovate.yml) runs
 self-hosted Renovate weekly (Friday 03:00 UTC) against this repository, with
 policy in [renovate.json](../renovate.json).

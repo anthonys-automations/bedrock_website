@@ -20,7 +20,9 @@ Config::define('WP_MEMORY_LIMIT', '128M');
 
 Config::define('WP_DEBUG', true);
 Config::define('WP_DEBUG_DISPLAY', true);
-Config::define('WP_DEBUG_LOG', '/var/log/php/wp.log');
+// See the note in production.php: errors go to Apache's error log / container
+// stderr rather than to a file inside the container.
+Config::define('WP_DEBUG_LOG', false);
 
 Config::define('WP_PROXY_HOST', '10.0.1.17');
 Config::define('WP_PROXY_PORT', '8888');

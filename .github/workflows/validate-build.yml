@@ -1,4 +1,4 @@
-# Build-only validation of the bedrock_website image.
+# Build and runtime validation of the bedrock_website image.
 #
 # Added so Renovate branches get a real check result. The bot authenticates
 # with GITHUB_TOKEN, whose pushes and pull requests never start a workflow run,
@@ -7,9 +7,12 @@
 # (an API-triggered `workflow_dispatch` does run, unlike a bot push), which
 # reports a check on the branch head that Renovate can then gate the merge on.
 #
-# Deliberately build-only: image_build.yml allocates an immutable release
+# Deliberately does not publish: image_build.yml allocates an immutable release
 # version and pushes to DockerHub, which must never happen from an unmerged
-# branch.
+# branch. This workflow builds the image and smoke tests the running container
+# locally instead - since the move to a single Apache/mod_php process, a base
+# image bump that still builds but no longer serves is the failure worth
+# catching on a Renovate branch.
 #
 # Runs on the same self-hosted ARM64 runner as the release build so a base image
 # bump is validated on the architecture it will actually be published for.
@@ -39,10 +42,113 @@ jobs:
           file: ./Dockerfile
           platforms: linux/arm64
           push: false
+          # Loaded into the local daemon so the runtime smoke test below can
+          # actually start it. Since the switch from nginx + PHP-FPM +
+          # supervisord to a single Apache/mod_php process, a build that
+          # succeeds but produces a container that cannot serve is the failure
+          # mode worth catching here.
+          load: true
+          tags: bedrock_website:validate
           # Mirrors the build arg used by image_build.yml so a missing or
           # renamed ARG is caught here rather than at release time.
           build-args: |
             GIT_COMMIT=${{ github.sha }}
+
+      - name: Smoke test the Apache runtime
+        env:
+          SITE_NAME: bedrock.validate.local
+        run: |
+          set -euo pipefail
+
+          docker run -d --name bedrock_validate -e SITE_NAME="${SITE_NAME}" \
+            bedrock_website:validate
+
+          # No database is attached, so WordPress itself will error. What is
+          # under test is the web layer: Apache must start, answer on both
+          # ports and enforce the uploads rule.
+          for _ in $(seq 1 30); do
+            if docker exec bedrock_validate curl -s -o /dev/null http://127.0.0.1/; then
+              break
+            fi
+            sleep 2
+          done
+
+          echo "== apache configuration =="
+          docker exec bedrock_validate apache2ctl -t
+          docker exec bedrock_validate apache2ctl -M | grep -E 'rewrite|headers|ssl|php'
+
+          # Architecture contract: Apache/mod_php is the only server runtime.
+          # These binaries were present in the old image and would indicate a
+          # partial migration if they reappeared.
+          for binary in nginx php-fpm supervisord; do
+            if docker exec bedrock_validate sh -c "command -v ${binary}"; then
+              echo "error: obsolete runtime still installed: ${binary}" >&2
+              exit 1
+            fi
+          done
+
+          # Verify the active config, not just the checked-in source: errors
+          # must reach container stderr and access files must be bounded.
+          apache_config=$(docker exec bedrock_validate apache2ctl -t -D DUMP_RUN_CFG 2>&1)
+          printf '%s\n' "${apache_config}"
+          grep -F 'ErrorLog: "/proc/self/fd/2"' <<< "${apache_config}"
+          docker exec bedrock_validate apache2ctl -t -D DUMP_VHOSTS 2>&1 \
+            | grep -F '127.0.0.1:8081'
+          docker exec bedrock_validate grep -F \
+            'rotatelogs -f -n 3 /var/log/apache2/access.log 50M' \
+            /etc/apache2/sites-enabled/bedrock.conf
+
+          check() {
+            local desc=$1 url=$2 expected=$3
+            local code
+            code=$(docker exec bedrock_validate \
+              curl -s -o /dev/null -w '%{http_code}' "${url}" || true)
+            echo "${desc}: ${url} -> ${code}"
+            if [[ "${code}" == "000" ]]; then
+              echo "error: no response from ${url}" >&2
+              exit 1
+            fi
+            if [[ -n "${expected}" && "${code}" != "${expected}" ]]; then
+              echo "error: expected ${expected} from ${url}, got ${code}" >&2
+              exit 1
+            fi
+          }
+
+          # Front door used by Cloudflare/ingress.
+          check "http front door" "http://127.0.0.1/" ""
+          # Loopback path: verifies the generated certificate is trusted
+          # in-container and that SITE_NAME resolves back to Apache. curl is
+          # intentionally not given -k here.
+          check "https loopback" "https://${SITE_NAME}/" ""
+          # PHP must never execute from the uploads volume.
+          check "uploads php denied" "http://127.0.0.1/app/uploads/probe.php" "403"
+          # mod_status must not be reachable on the ingress-facing vhost.
+          check "server-status not public" "http://127.0.0.1/server-status" "403"
+
+          # Telemetry endpoint the Prometheus exporter sidecar scrapes.
+          echo "== mod_status =="
+          check "telemetry endpoint" "http://127.0.0.1:8081/server-status?auto" "200"
+          docker exec bedrock_validate \
+            curl -sS "http://127.0.0.1:8081/server-status?auto" | grep -E '^(BusyWorkers|Total Accesses):'
+
+          # Logging contract: access lines land in the rotating file, errors
+          # (Apache and PHP alike) land on the container's stderr.
+          echo "== access log =="
+          docker exec bedrock_validate test -s /var/log/apache2/access.log
+          docker exec bedrock_validate tail -n 3 /var/log/apache2/access.log
+
+          if [[ -z "$(docker logs bedrock_validate 2>&1)" ]]; then
+            echo "error: container produced no log output" >&2
+            exit 1
+          fi
+
+          # Signals must reach PID 1 now that supervisord is gone.
+          docker stop --timeout 20 bedrock_validate
+
+      - name: Container cleanup
+        if: always()
+        run: |
+          docker rm -f bedrock_validate || true
 
       - name: Images cleanup
         if: always()

@@ -1,8 +1,12 @@
-# Pinned to an explicit PHP release instead of the floating `8.2-fpm` tag so
+# Apache variant of the official PHP image: PHP runs as mod_php inside Apache,
+# so the container has a single process and needs no supervisord, no nginx and
+# no hand-tuned FPM pool.
+#
+# Pinned to an explicit PHP release instead of the floating `8.2-apache` tag so
 # builds are reproducible and base image bumps are proposed and reviewed by
 # Renovate (see renovate.json / docs/image-versioning.md) rather than arriving
 # silently on the next rebuild.
-FROM php:8.2.32-fpm AS base
+FROM php:8.2.32-apache AS base
 LABEL name=bedrock
 LABEL intermediate=true
 
@@ -32,11 +36,12 @@ RUN chmod +x /usr/local/bin/install-php-extensions && sync \
   && install-php-extensions \
     @composer \
     exif \
-    gd \ 
+    gd \
     imagick \
     intl \
     memcached \
     mysqli \
+    opcache \
     pcntl \
     pdo_mysql \
     zip \
@@ -61,31 +66,35 @@ RUN chmod +x /usr/local/bin/install-php-extensions && sync \
 FROM php AS bedrock
 LABEL name=bedrock
 
-# Install nginx & supervisor
+# Node/yarn are for building themes, not for serving traffic.
 RUN curl -sL https://deb.nodesource.com/setup_20.x | bash \
   && apt-get update \
   && apt-get install -y \
-    nginx \
     nodejs \
-    supervisor \
   && apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
   && rm -rf /var/lib/apt/lists/* \
   && apt-get clean \
   && npm install -g yarn
 
-# Configure nginx, php-fpm and supervisor
-COPY ./build/nginx/nginx.conf /etc/nginx/nginx.conf
-COPY ./build/nginx/sites-enabled/default.conf /etc/nginx/sites-available/default
-COPY ./build/php/8.2/fpm/pool.d /etc/php/8.2/fpm/pool.d
-COPY ./build/supervisor/supervisord.conf /etc/supervisord.conf
+# rewrite: WordPress front controller. headers: the security response headers
+# previously added by nginx. ssl: the loopback-only HTTPS vhost on 443.
+# status: the mod_status endpoint a Prometheus exporter sidecar scrapes.
+# Everything else (MPM, keep-alive, process recycling) stays at upstream
+# defaults - avoiding bespoke tuning is the point of this image layout.
+COPY ./build/apache/bedrock.conf /etc/apache2/sites-available/bedrock.conf
+RUN a2enmod rewrite headers ssl status \
+  && a2dissite 000-default \
+  && a2ensite bedrock \
+  && a2disconf other-vhosts-access-log
+
 COPY ./build/bin/run.sh /run.sh
 COPY ./build/php/php.ini /usr/local/etc/php/conf.d/php.ini
 
 COPY ./bedrock /srv/bedrock
+# /var/log/php is gone with PHP-FPM: mod_php writes to Apache's error log,
+# which the vhost sends to the container's stderr.
 RUN cd /srv/bedrock \
   && composer update \
-  && mkdir /var/log/php \
-  && chown www-data /var/log/php \
   && chmod +x /run.sh
 
 # Build-time provenance: the Git commit this image was built from, so a running
@@ -97,6 +106,12 @@ RUN cd /srv/bedrock \
 # image digest remains the authoritative audit record.
 ARG GIT_COMMIT=unknown
 ENV GIT_COMMIT=${GIT_COMMIT}
+
+# Probe Apache itself rather than WordPress: a database outage can make `/`
+# return 500 even though the web process is healthy. Kubernetes should use its
+# own readiness probe when application availability must gate traffic.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -fsS -o /dev/null 'http://127.0.0.1:8081/server-status?auto' || exit 1
 
 WORKDIR /srv/bedrock
 CMD ["/run.sh"]

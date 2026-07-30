@@ -5,7 +5,11 @@ services:
     pull_policy: always
     restart: always
     ports:
-      - $PORT:443
+      # Container port 80, not 443: public TLS is terminated upstream
+      # (Cloudflare / ingress / host reverse proxy). The container's 443
+      # listener is reserved for in-container HTTPS loopback calls and is
+      # deliberately not published.
+      - $PORT:80
     env_file: .env
     volumes:
       - $VOL:/srv/bedrock/web/app/uploads

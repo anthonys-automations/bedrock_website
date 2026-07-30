@@ -19,4 +19,4 @@ wp login install --activate --yes --skip-plugins --skip-themes
 
 wp login as 1
 
-/usr/bin/supervisord -c /etc/supervisord.conf > /dev/null
+/run.sh > /dev/null

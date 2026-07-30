@@ -50,6 +50,66 @@ wp theme activate sage
 
 ## Container images
 
+The container runs a single process: Apache with `mod_php`, started as PID 1 by
+`build/bin/run.sh`. There is no nginx, no PHP-FPM and no supervisord, and no
+MPM/worker tuning is carried in this repo - the upstream `php:<version>-apache`
+defaults are used on purpose.
+
+Ports:
+
+- **80** - the front door. Public TLS is terminated upstream (Cloudflare, then
+  the k8s ingress controller or a host reverse proxy), which forwards plain
+  HTTP to the container.
+- **443** - internal only. `run.sh` generates a self-signed certificate for
+  `SITE_NAME`, installs it into the container's CA store and points `SITE_NAME`
+  at `127.0.0.1`, so WordPress loopback/REST calls against the `https://` value
+  of `WP_HOME` succeed without leaving the container. Nothing outside the
+  container is expected to trust that certificate, and this port should not be
+  published.
+
+Apache configuration lives in [build/apache/bedrock.conf](build/apache/bedrock.conf).
+
+### Logs
+
+- **Errors** (Apache *and* PHP) go to the container's stderr, so `kubectl logs`
+  or `docker logs` shows both in one stream. PHP's `error_log` is intentionally
+  unset in [build/php/php.ini](build/php/php.ini) and `WP_DEBUG_LOG` is `false`
+  in the environment configs; pointing either at a file hides application
+  errors from the container log.
+- **Access logs** are written inside the container to
+  `/var/log/apache2/access.log` in `combined` format, rotated by `rotatelogs`
+  at 50M with 3 files kept, since the container has no log rotation of its own.
+  The k8s ingress remains the source of external access logs, so this file is
+  for in-container inspection (`docker exec <container> tail -f
+  /var/log/apache2/access.log`) and is lost when the container is replaced.
+  Mount `/var/log/apache2` if it needs to outlive the container.
+
+### Telemetry
+
+Apache exposes `mod_status` at `http://127.0.0.1:8081/server-status?auto`
+(`ExtendedStatus` on). The port is loopback-only and carries nothing else, so it
+is unreachable through the ingress and cannot collide with the WordPress
+rewrite; `/server-status` is explicitly denied on the public vhosts.
+
+Apache has no native Prometheus format, so scraping needs an exporter. Run it as
+a sidecar rather than adding a second process to this image:
+
+```yaml
+- name: apache-exporter
+  image: bitnami/apache-exporter:1.0.10
+  args:
+    - --scrape_uri=http://127.0.0.1:8081/server-status?auto
+  ports:
+    - name: metrics
+      containerPort: 9117
+```
+
+Containers in a pod share the network namespace, so the sidecar reaches the
+loopback port and Prometheus scrapes the sidecar's `:9117/metrics`. This yields
+worker/scoreboard state, request and byte counters, and uptime - enough to see
+saturation of the prefork pool. Per-request latency and status codes still come
+from the ingress metrics.
+
 Published images use an immutable, architecture-scoped calendar version:
 
 ```text

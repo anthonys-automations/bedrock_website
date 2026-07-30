@@ -1,6 +1,6 @@
 # Standalone (self-hosted) Renovate bot run.
 # Added together with the pinned PHP base image: pinning removed the implicit
-# `8.2-fpm` drift, so an automated updater is needed to replace it. This
+# `8.2-apache` drift, so an automated updater is needed to replace it. This
 # workflow's cron is the single source of truth for run timing (renovate.json
 # intentionally has no `schedule`); renovate.json only holds the update policy.
 name: Renovate

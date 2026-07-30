@@ -132,7 +132,7 @@ spec:
         # Apache/PHP errors) while still exposing them to `kubectl logs` and
         # any node-level collector watching container stdout.
         - name: access-log-tail
-          image: busybox:1.36
+          image: busybox:1.38
           # -F retries the path, so it tolerates the file not existing yet.
           command:
             - /bin/sh
@@ -154,7 +154,7 @@ spec:
 
         # --- Sidecar: access log -> Prometheus metrics ----------------------
         - name: access-log-exporter
-          image: ghcr.io/google/mtail:3.0.6
+          image: ghcr.io/google/mtail:3.0.8
           args:
             - --logs=/var/log/apache2/access.log
             - --progs=/etc/mtail
@@ -187,7 +187,7 @@ spec:
         # needs no password and so no Secret. Persistence is off - counter
         # resets on restart are normal and handled by rate().
         - name: redis
-          image: redis:7.4-alpine
+          image: redis:8.10-alpine
           args:
             - --bind
             - 127.0.0.1

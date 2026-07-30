@@ -297,10 +297,11 @@ jobs:
           # 404 rather than 403, and that distinction is the whole point: the
           # plugin ships in the image but a fresh install leaves it
           # deactivated, so WordPress has no such REST route to answer with.
-          # Getting past the deny at all is what proves the vhost's re-allow
-          # overrides the server-scope rule - the one piece of Apache
-          # section-merge behaviour this listener depends on. Same headers as
-          # the front door, so WordPress serves rather than canonical-redirects.
+          # Getting past the deny at all is what proves the request survived
+          # both authorization passes - the scrape itself and the internal
+          # redirect to /index.php that the front controller rewrite triggers,
+          # which a URI-based re-allow silently 403'd. Same headers as the
+          # front door, so WordPress serves rather than canonical-redirects.
           check "prompress metrics listener allowed" 404 \
             -H "Host: ${SITE_NAME}" -H 'X-Forwarded-Proto: https' \
             'http://127.0.0.1:9118/wp-json/prompress/v1/metrics'

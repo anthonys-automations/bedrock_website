@@ -159,7 +159,10 @@ permission callback at all*, so anything that can reach it can reset the site's
 counters. [build/apache/bedrock.conf](build/apache/bedrock.conf) therefore denies
 the whole `/wp-json/prompress` prefix at server scope — `:80` and `:443` return
 403 — and re-allows only the read-only metrics route on a dedicated listener,
-port **9118**, the same belt-and-braces shape used for `mod_status`.
+port **9118**, the same belt-and-braces shape used for `mod_status`. That
+re-allow matches on the original request line rather than the current URI,
+because the front controller rewrite makes Apache authorize the scrape twice:
+once as `/wp-json/...` and again as `/index.php`.
 
 Unlike the `mod_status` listener, 9118 is bound to all interfaces, because
 Prometheus scrapes it from outside the pod. It exposes that one route and

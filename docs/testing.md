@@ -32,7 +32,7 @@ The workflow requires these exact HTTP results:
 | `/server-status` on the public vhost | `403` | `mod_status` must not be exposed through ingress. |
 | `/wp-json/prompress/v1/metrics` and `/wp-json/prompress/v1/storage/wipe` on the public vhost | `403` | PromPress serves its metrics unauthenticated unless a token is configured, and registers `storage/wipe` with no permission callback at all, so neither route may reach ingress. |
 | `http://127.0.0.1:9118/` | `403` | The dedicated PromPress metrics listener denies everything but the one route it exists for. |
-| `http://127.0.0.1:9118/wp-json/prompress/v1/metrics` | `404` | Anything other than `403` proves the vhost's re-allow overrides the server-scope deny, which is the Apache section-merge behaviour the listener depends on. It is `404` rather than `200` because the plugin ships in the image but a fresh install leaves it deactivated, so WordPress has no such route. |
+| `http://127.0.0.1:9118/wp-json/prompress/v1/metrics` | `404` | Anything other than `403` proves the request survived both authorization passes: the scrape itself, and the internal redirect to `/index.php` that the front controller rewrite triggers. It is `404` rather than `200` because the plugin ships in the image but a fresh install leaves it deactivated, so WordPress has no such route. |
 | `http://127.0.0.1:8081/server-status?auto` | `200` | The Prometheus exporter sidecar's loopback telemetry endpoint remains available. |
 
 The `403` checks are successful security assertions. They are not ignored

@@ -163,7 +163,12 @@ Three things about that setup are easy to get wrong:
 - **It uses the built-in `GITHUB_TOKEN`**, not a PAT. No secret to rotate, but
   its pushes start no workflow runs and it cannot write under
   `.github/workflows`. Actions version bumps are therefore routed to the
-  dependency dashboard for manual application.
+  dependency dashboard for manual application. It also cannot read Dependabot
+  alerts — that is a GitHub App permission with no equivalent key in a
+  workflow's `permissions:` block — so `vulnerabilityAlerts` is disabled in
+  `renovate.json`; leaving it on only logged `Cannot access vulnerability
+  alerts` on every run. Granting it would require a PAT with the
+  `security_events` scope.
 - **Automerge needs a check that actually runs.** Because bot pushes trigger
   nothing, the workflow explicitly dispatches
   [validate-build.yml](../.github/workflows/validate-build.yml) — a build-only,

@@ -96,11 +96,14 @@ jobs:
           # to create or rotate. Referencing a RENOVATE_TOKEN secret that does
           # not exist would abort the run outright ("'token' MUST be passed
           # using its input or the 'RENOVATE_TOKEN' environment variable"),
-          # since an unset secret expands to an empty string. Two consequences
-          # to be aware of: its pushes never start a workflow run (hence the
-          # explicit dispatch step below), and it cannot write files under
-          # .github/workflows (Actions version bumps are therefore routed to the
-          # dependency dashboard for manual application).
+          # since an unset secret expands to an empty string. Three
+          # consequences to be aware of: its pushes never start a workflow run
+          # (hence the explicit dispatch step below), it cannot write files
+          # under .github/workflows (Actions version bumps are therefore routed
+          # to the dependency dashboard for manual application), and it cannot
+          # read Dependabot alerts (so `vulnerabilityAlerts` is disabled in
+          # renovate.json to avoid a permanent "Cannot access vulnerability
+          # alerts" warning).
           token: ${{ github.token }}
 
       # Renovate exits 0 even when the repository run ends in an error state

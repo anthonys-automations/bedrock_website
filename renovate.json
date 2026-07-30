@@ -42,7 +42,7 @@
     }
   ],
   "vulnerabilityAlerts": {
-    "enabled": true,
-    "automerge": true
+    "description": "Disabled because the run authenticates with the built-in GITHUB_TOKEN, which cannot read Dependabot alerts: that is a GitHub App 'vulnerability_alerts' permission and there is no matching key for the Actions token's 'permissions:' block, so it cannot be granted from the workflow. Leaving this enabled only produced 'WARN: Cannot access vulnerability alerts' on every run (a warning, so the log check still passed) and never any extra PR. Nothing is lost in practice either: Dependabot alerts do not cover the pinned Docker base image, and the github-actions manager is already dashboard-only. Re-enable this together with a PAT that has the 'security_events' scope if alert-driven PRs are ever wanted.",
+    "enabled": false
   }
 }

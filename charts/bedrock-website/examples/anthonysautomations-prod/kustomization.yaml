@@ -1,0 +1,19 @@
+# www.anthonysautomations.com
+#
+#   kubectl kustomize --enable-helm --load-restrictor LoadRestrictionsNone \
+#     sites/anthonysautomations-prod | kubectl apply -f -
+#
+# releaseName must stay anthonysautomations-prod: the envFrom Secret, the
+# uploads subPath and the Deployment's immutable label selector derive from it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmGlobals:
+  chartHome: ../../..
+
+helmCharts:
+  - name: bedrock-website
+    releaseName: anthonysautomations-prod
+    valuesInline:
+      hostname: www.anthonysautomations.com
+      dbPasswordSecret: anthonysautomations-dbpassword

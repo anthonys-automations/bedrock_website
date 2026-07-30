@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bedrock-website.fullname" . }}
+  labels:
+    {{- include "bedrock-website.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "bedrock-website.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: http
+    # Scrape targets. Separate ports, so prefer one PodMonitor per port over
+    # the single-port `prometheus.io/*` annotations.
+    - name: metrics-apache
+      port: 9117
+      targetPort: metrics-apache
+    - name: metrics-log
+      port: 3903
+      targetPort: metrics-log
+    # Every scrape here is a full WordPress bootstrap - keep the interval modest.
+    - name: metrics-wp
+      port: 9118
+      targetPort: metrics-wp
+---
+# Standard prometheus.io annotations select one port per Service. Separate
+# Services keep Apache, mtail, and PromPress metrics all discoverable.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bedrock-website.fullname" . }}-metrics-apache
+  labels:
+    {{- include "bedrock-website.labels" . | nindent 4 }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: /metrics
+    prometheus.io/port: "9117"
+spec:
+  selector:
+    {{- include "bedrock-website.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9117
+      protocol: TCP
+      targetPort: metrics-apache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bedrock-website.fullname" . }}-metrics-log
+  labels:
+    {{- include "bedrock-website.labels" . | nindent 4 }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: /metrics
+    prometheus.io/port: "3903"
+spec:
+  selector:
+    {{- include "bedrock-website.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 3903
+      protocol: TCP
+      targetPort: metrics-log
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bedrock-website.fullname" . }}-metrics-wp
+  labels:
+    {{- include "bedrock-website.labels" . | nindent 4 }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: /wp-json/prompress/v1/metrics
+    prometheus.io/port: "9118"
+    # PromPress boots WordPress for every scrape; avoid an aggressive interval.
+    prometheus.io/scrape_interval: 60s
+spec:
+  selector:
+    {{- include "bedrock-website.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9118
+      protocol: TCP
+      targetPort: metrics-wp

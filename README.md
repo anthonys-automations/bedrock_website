@@ -172,9 +172,8 @@ the plugin has not been tested against the last few WordPress releases; since
 this project pins nothing (`>0` constraints, no committed lockfile), verify it
 after WordPress major upgrades.
 
-A full worked example of all four sidecars together, including the mtail
-program, the Redis sidecar and probes for the main container, is in
-[k8s/deployment-example.yaml](k8s/deployment-example.yaml).
+The Helm chart below contains the complete deployment, including the mtail
+program, Redis sidecar, and probes for the main container.
 
 Published images use an immutable, architecture-scoped calendar version:
 
@@ -185,9 +184,85 @@ anthonysautomations/bedrock_website:<YYYY>.<MM>.<DD>.<N>-<arch>
 - `amd64` is built by CI (`.github/workflows/image_build.yml`) on push to `dev`/`main` and weekly.
 - `arm64` is built by hand with `./scripts/build-arm64.sh`.
 - `latest-<arch>` is a convenience alias only. **Never deploy it**, and note that the plain `latest` tag is no longer updated.
-- The pinned PHP base image is bumped automatically by Renovate (`.github/workflows/renovate.yml`, policy in `renovate.json`).
+- The pinned PHP base image is bumped automatically by Renovate (`.github/workflows/renovate.yml`, policy in `renovate.json`). Renovate also tracks the telemetry sidecar images pinned in the chart's templates, and bumps the chart `version` in the same commit; the main image is excluded there, since its rollout is the deliberate `appVersion` bump below.
 
 See [docs/image-versioning.md](docs/image-versioning.md) for the full tag contract, provenance metadata and updater setup.
+
+## Deploying
+
+[charts/bedrock-website](charts/bedrock-website) is the Helm chart the live
+sites are deployed from. It renders the manifest shape documented above -
+Deployment (main container plus the four telemetry sidecars), Service,
+HTTPRoute and the mtail ConfigMap - and is deliberately narrow: everything the
+sites share is fixed in the templates, the image tag is the chart's
+`appVersion`, and per-site values configure the public hostname, the existing
+database-password Secret, and container resource sizing.
+
+The included Kustomize example inflates the chart with `valuesInline` rather
+than a Helm values file:
+
+- [charts/bedrock-website/examples/anthonysautomations-prod](charts/bedrock-website/examples/anthonysautomations-prod)
+
+The chart also creates a `grafana_dashboard: "1"` ConfigMap named
+`<release>-grafana-dashboard`. Configure Grafana's dashboard sidecar to watch
+that label in the release namespace; it provisions **Bedrock Website
+Telemetry**, covering Apache exporter, mtail access-log, and PromPress metrics.
+The dashboard has separate target selectors for each exporter and a Prometheus
+datasource selector. This prevents cross-site aggregation when one Grafana
+instance serves multiple releases.
+
+Prometheus annotation-based discovery is enabled through three dedicated
+Services: `<release>-metrics-apache`, `<release>-metrics-log`, and
+`<release>-metrics-wp`. Each carries the standard `prometheus.io/scrape`,
+`prometheus.io/path`, and `prometheus.io/port` annotations for its one metric
+endpoint. The PromPress Service also requests a 60-second interval because a
+scrape performs a full WordPress bootstrap. The Prometheus Kubernetes service
+discovery configuration must honor these annotations.
+
+The `resources` value has a block for `bedrock`, `apacheExporter`,
+`accessLogTail`, `accessLogExporter`, and `redis`. Its defaults match the
+previous fixed resource requests and limits; override only the needed block in
+a site overlay to tune it for that cluster.
+
+The HTTPRoute is rendered by default; set `httpRoute: false` where routing is
+owned elsewhere or the Gateway API CRDs are absent.
+
+```sh
+kubectl kustomize --enable-helm --load-restrictor LoadRestrictionsNone \
+  charts/bedrock-website/examples/anthonysautomations-prod | kubectl apply -f -
+```
+
+`--enable-helm` is what runs `helm template`; `--load-restrictor
+LoadRestrictionsNone` is needed because the chart sits outside the example
+directory (`helmGlobals.chartHome: ../../..`), which Kustomize refuses
+by default.
+
+Resource names are named after `releaseName`, which must therefore stay the name
+the site is already deployed under: the `envFrom` Secret, the uploads `subPath`
+on the shared `wordpress-data` claim and the Deployment's (immutable) label
+selector all derive from it.
+
+Rolling out a new image is an `appVersion` bump in
+[charts/bedrock-website/Chart.yaml](charts/bedrock-website/Chart.yaml), pinned
+to an immutable tag - never `latest`. The `version` field next to it is the
+chart's own version and moves whenever the templates or values change; Renovate
+bumps its patch level itself when it updates a sidecar image. Add another
+directory under `charts/bedrock-website/examples` for a site that only needs
+different values; a site that needs anything else to differ does not belong in
+this chart as it stands.
+
+This path never creates a Helm release - Kustomize only templates the chart and
+`kubectl apply` owns the result. If you instead install the chart with Helm
+directly over resources that are already deployed, the first run has to adopt
+them, which Helm refuses without:
+
+```sh
+helm upgrade --install --take-ownership anthonysautomations-prod \
+  charts/bedrock-website \
+  --set hostname=www.anthonysautomations.com \
+  --set dbPasswordSecret=anthonysautomations-dbpassword
+```
+
 
 ## Community
 

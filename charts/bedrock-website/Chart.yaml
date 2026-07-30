@@ -1,0 +1,13 @@
+apiVersion: v2
+name: bedrock-website
+description: >-
+  Runs the anthonysautomations/bedrock_website image for the sites in
+  examples. Deliberately narrow: shared configuration is fixed in the
+  templates, with site-specific settings supplied as values.
+type: application
+# Chart version. Bump on template/values changes. Renovate bumps the patch
+# level itself whenever it edits a file under templates/ (see renovate.json).
+version: 0.5.1
+# The image tag the Deployment runs, verbatim. Bumping this is the image
+# rollout.
+appVersion: "2026.07.30.1-amd64"

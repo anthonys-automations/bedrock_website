@@ -184,3 +184,29 @@ Three things about that setup are easy to get wrong:
 `bedrock/composer.json` is intentionally left unmanaged: its requirements are
 open `>0` constraints with no committed lock file, so the weekly rebuild already
 picks up new plugin releases and the calendar version makes that visible.
+
+## Keeping the chart's sidecar images current
+
+The Helm chart pins its telemetry sidecars (`bitnami/apache-exporter`,
+`busybox`, `ghcr.io/google/mtail`, `redis`) inline in
+[charts/bedrock-website/templates/deployment.yaml](../charts/bedrock-website/templates/deployment.yaml),
+not in `values.yaml`. Renovate's `kubernetes` manager ships with no default file
+pattern, so `renovate.json` names those template files explicitly; without that
+entry no chart image is actionable for Renovate.
+
+Two consequences follow:
+
+- **The main image has to be excluded by name.** Its tag is a Helm expression
+  (`{{ .Chart.AppVersion }}`), it is calendar-versioned rather than semver, and
+  its rollout is the deliberate `appVersion` edit described above. A packageRule
+  in `renovate.json` disables it. An inline `# renovate:ignore` comment would
+  not do the job — the `kubernetes` manager does not honour that convention, and
+  would read the templated tag as no tag at all.
+- **A sidecar bump is a chart change, so the chart version moves with it.** The
+  overlays inflate the chart straight from this repository, so nothing else
+  would signal that the rendered manifests changed. Renovate's `bumpVersions`
+  feature rewrites `version:` in
+  [charts/bedrock-website/Chart.yaml](../charts/bedrock-website/Chart.yaml)
+  inside the same commit. Its `matchString` starts at a newline rather than
+  `^`, because Renovate compiles it without the multiline flag and `version:`
+  is not at the beginning of `Chart.yaml`.

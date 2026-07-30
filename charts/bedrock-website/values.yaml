@@ -1,0 +1,60 @@
+# Per-site values, and only those: everything the sites share (image, replica
+# count, in-cluster service hostnames, uploads claim, gateway, and telemetry
+# sidecars) is fixed in the templates, and the image tag is Chart.yaml's
+# appVersion.
+#
+# Resource names (Deployment, Service, HTTPRoute, ConfigMap, the envFrom
+# Secret and the uploads subPath) all come from the Helm release name, which
+# must therefore stay the name the site is already deployed under
+# (anthonysautomations-prod, mountainofwonders-prod) - the Deployment's label
+# selector is immutable and the Secret and subPath already exist under it.
+#
+# Both keys are required; charts/bedrock-website/examples/<release-name>
+# supplies them.
+
+# Public hostname. Routed by the HTTPRoute and passed to the container as
+# SITE_NAME (vhost ServerName and the loopback certificate).
+hostname: ""
+
+# Existing Secret holding the database password under the key `password`.
+# Not derived from the release name because the two do not match
+# (anthonysautomations-prod -> anthonysautomations-dbpassword).
+dbPasswordSecret: ""
+
+# Render the HTTPRoute. Turn off where routing is owned elsewhere or the
+# Gateway API CRDs are absent; the Service still exposes the site in-cluster.
+httpRoute: true
+
+# Resource sizing is configurable per site to suit its cluster while preserving
+# the current production settings as defaults.
+resources:
+  bedrock:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  apacheExporter:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+  accessLogTail:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 32Mi
+  accessLogExporter:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+  redis:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 96Mi

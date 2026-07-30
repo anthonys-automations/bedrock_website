@@ -14,6 +14,12 @@
   "labels": [
     "dependencies"
   ],
+  "kubernetes": {
+    "description": "The chart's telemetry sidecar images are pinned inside charts/bedrock-website/templates/deployment.yaml, and the kubernetes manager ships with no default file pattern, so those files are invisible to Renovate until they are listed here. Helm templating is not a problem: the manager reads 'image:' lines with a strict Docker reference regex line by line, and the YAML parse it uses for apiVersion updates fails closed (a debug message, no error) on the '{{ ... }}' placeholders.",
+    "managerFilePatterns": [
+      "/^charts/bedrock-website/templates/.+\\.yaml$/"
+    ]
+  },
   "packageRules": [
     {
       "description": "Bump the pinned PHP base image in the Dockerfile. A merged bump is published by the next image_build.yml run as a new immutable calendar version, which is what deployments then move to.",
@@ -24,6 +30,35 @@
         "php"
       ],
       "automerge": true
+    },
+    {
+      "description": "This repository's own image, rendered from the chart's appVersion. It is calendar-versioned rather than semver and its rollout is a deliberate, by-hand Chart.yaml edit (docs/image-versioning.md), so Renovate must not track it. Disabling it by name is what makes that stick: the '# renovate:ignore' comment convention is not honoured by the kubernetes manager, which would instead read the templated tag as no tag at all.",
+      "matchManagers": [
+        "kubernetes"
+      ],
+      "matchPackageNames": [
+        "docker.io/anthonysautomations/bedrock_website",
+        "anthonysautomations/bedrock_website"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "A sidecar image bump edits a chart template, so the chart version has to move with it - the Kustomize overlays inflate the chart from this repository and nothing else would signal that the rendered manifests changed. 'bumpVersions' does that inside the same commit. The matchString starts at a newline because Renovate compiles it without the multiline flag, so '^version:' would only match the beginning of Chart.yaml rather than its version line.",
+      "matchFileNames": [
+        "charts/bedrock-website/templates/**"
+      ],
+      "bumpVersions": [
+        {
+          "name": "bedrock-website chart version",
+          "filePatterns": [
+            "charts/bedrock-website/Chart.yaml"
+          ],
+          "matchStrings": [
+            "\\nversion:\\s+(?<version>\\S+)"
+          ],
+          "bumpType": "patch"
+        }
+      ]
     },
     {
       "description": "GitHub Actions updates are listed on the dependency dashboard instead of raising branches: GITHUB_TOKEN has no 'workflow' scope, so pushing a change under .github/workflows is rejected and the run would fail on every attempt. Tick an item on the dashboard only if you intend to apply that bump by hand.",

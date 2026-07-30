@@ -30,7 +30,12 @@ FROM base AS php
 LABEL name=bedrock
 LABEL intermediate=true
 
-# Install php extensions and related packages
+# Install php extensions and related packages.
+#
+# redis is here for the PromPress plugin: it stores its Prometheus counters in
+# Redis and disables itself outright (admin notice only) when the PECL
+# extension is missing, so this is a hard requirement rather than a
+# performance option. See the Telemetry section of the README.
 ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
 RUN chmod +x /usr/local/bin/install-php-extensions && sync \
   && install-php-extensions \
@@ -44,6 +49,7 @@ RUN chmod +x /usr/local/bin/install-php-extensions && sync \
     opcache \
     pcntl \
     pdo_mysql \
+    redis \
     zip \
     gmp \
     bcmath \

@@ -30,9 +30,12 @@ The workflow requires these exact HTTP results:
 | `https://bedrock.validate.local/` inside the container | `200` | Confirms the generated loopback certificate is trusted and the hostname resolves to Apache. |
 | `/app/uploads/probe.php` | `403` | PHP must never execute from the uploads volume. |
 | `/server-status` on the public vhost | `403` | `mod_status` must not be exposed through ingress. |
+| `/wp-json/prompress/v1/metrics` and `/wp-json/prompress/v1/storage/wipe` on the public vhost | `403` | PromPress serves its metrics unauthenticated unless a token is configured, and registers `storage/wipe` with no permission callback at all, so neither route may reach ingress. |
+| `http://127.0.0.1:9118/` | `403` | The dedicated PromPress metrics listener denies everything but the one route it exists for. |
+| `http://127.0.0.1:9118/wp-json/prompress/v1/metrics` | `404` | Anything other than `403` proves the vhost's re-allow overrides the server-scope deny, which is the Apache section-merge behaviour the listener depends on. It is `404` rather than `200` because the plugin ships in the image but a fresh install leaves it deactivated, so WordPress has no such route. |
 | `http://127.0.0.1:8081/server-status?auto` | `200` | The Prometheus exporter sidecar's loopback telemetry endpoint remains available. |
 
-The two `403` checks are successful security assertions. They are not ignored
+The `403` checks are successful security assertions. They are not ignored
 failures. In contrast, the front-door and loopback requests must be exactly
 `200`; accepting any response merely because curl connected allows HTTP 500 to
 pass unnoticed.
@@ -47,9 +50,14 @@ The job additionally verifies that:
 
 - Apache with `mod_php` is the only web runtime. `nginx`, `php-fpm`, and
   `supervisord` must not be installed.
+- The `redis` PHP extension is loaded. PromPress keeps its Prometheus counters
+  in Redis and disables itself with nothing but an admin notice when the
+  extension is missing, so dropping it from the Dockerfile would otherwise
+  surface only as silently absent metrics.
 - The running Apache configuration sends the error log to container stderr,
-  exposes the loopback telemetry vhost, and writes the access log through
-  `rotatelogs` with its bounded `3 x 50M` configuration.
+  exposes the loopback telemetry vhost and the PromPress metrics listener on
+  port 9118, and writes the access log through `rotatelogs` with its bounded
+  `3 x 50M` configuration.
 - PHP fatal errors, parse errors, and warnings in container stderr fail the
   workflow, even if the HTTP checks returned `200`. PHP deprecations and
   notices are printed as GitHub warnings so a dependency bump can be reviewed

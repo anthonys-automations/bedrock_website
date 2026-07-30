@@ -213,6 +213,12 @@ jobs:
           docker exec "${APP_CONTAINER}" apache2ctl -t
           docker exec "${APP_CONTAINER}" apache2ctl -M | grep -E 'rewrite|headers|ssl|php'
 
+          # PromPress keeps its Prometheus counters in Redis and disables
+          # itself with nothing but an admin notice when the PECL extension is
+          # missing. Without this check, dropping it from the Dockerfile's
+          # extension list would surface only as silently absent metrics.
+          docker exec "${APP_CONTAINER}" php -m | grep -x redis
+
           # Architecture contract: Apache/mod_php is the only server runtime.
           # These binaries were present in the old image and would indicate a
           # partial migration if they reappeared.
@@ -230,6 +236,8 @@ jobs:
           grep -F 'ErrorLog: "/proc/self/fd/2"' <<< "${apache_config}"
           docker exec "${APP_CONTAINER}" apache2ctl -t -D DUMP_VHOSTS 2>&1 \
             | grep -F '127.0.0.1:8081'
+          docker exec "${APP_CONTAINER}" apache2ctl -t -D DUMP_VHOSTS 2>&1 \
+            | grep -F ':9118'
           docker exec "${APP_CONTAINER}" grep -F \
             'rotatelogs -f -n 3 /var/log/apache2/access.log 50M' \
             /etc/apache2/sites-enabled/bedrock.conf
@@ -270,6 +278,30 @@ jobs:
           # mod_status must not be reachable on the ingress-facing vhost, so
           # 403 is again the expected answer.
           check "server-status not public" 403 'http://127.0.0.1/server-status'
+
+          # PromPress's REST routes must not be reachable there either:
+          # /metrics is unauthenticated unless a token is set in wp-admin, and
+          # /storage/wipe is registered with no permission callback at all, so
+          # an ingress-reachable route would let anyone reset the counters.
+          check "prompress metrics not public" 403 \
+            'http://127.0.0.1/wp-json/prompress/v1/metrics'
+          check "prompress wipe not public" 403 \
+            'http://127.0.0.1/wp-json/prompress/v1/storage/wipe'
+
+          # The dedicated metrics listener serves that one route and denies
+          # everything else.
+          check "prompress listener catch-all denied" 403 'http://127.0.0.1:9118/'
+          # 404 rather than 403, and that distinction is the whole point: the
+          # plugin ships in the image but a fresh install leaves it
+          # deactivated, so WordPress has no such REST route to answer with.
+          # Getting past the deny at all is what proves the vhost's re-allow
+          # overrides the server-scope rule - the one piece of Apache
+          # section-merge behaviour this listener depends on. Same headers as
+          # the front door, so WordPress serves rather than canonical-redirects.
+          check "prompress metrics listener allowed" 404 \
+            -H "Host: ${SITE_NAME}" -H 'X-Forwarded-Proto: https' \
+            'http://127.0.0.1:9118/wp-json/prompress/v1/metrics'
+
           # Telemetry endpoint the Prometheus exporter sidecar scrapes.
           check "telemetry endpoint" 200 'http://127.0.0.1:8081/server-status?auto'
 

@@ -1,0 +1,21 @@
+{{- if .Values.httpRoute }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "bedrock-website.fullname" . }}
+  labels:
+    {{- include "bedrock-website.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: https-gateway
+  hostnames:
+    - {{ include "bedrock-website.hostname" . | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "bedrock-website.fullname" . }}
+          port: 80
+{{- end }}

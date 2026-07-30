@@ -117,6 +117,65 @@ worker/scoreboard state, request and byte counters, and uptime - enough to see
 saturation of the prefork pool. Per-request latency and status codes still come
 from the ingress metrics.
 
+`mod_status` says nothing about individual requests, though, and the in-container
+access log (see above) is otherwise only reachable with `docker exec`/`kubectl
+exec`. Two more sidecars, sharing an `emptyDir` mounted at `/var/log/apache2`
+with the main container, cover that:
+
+- an **access-log-tail** sidecar that just `tail -F`s `access.log` to its own
+  stdout, so the access log is visible via `kubectl logs -c access-log-tail`
+  (or any node-level log collector watching container stdout) without mixing
+  into the main container's error stream.
+- an **access-log-exporter** sidecar running
+  [mtail](https://github.com/google/mtail) against the same file, turning each
+  `combined`-format line into Prometheus counters (requests/bytes by method,
+  HTTP version and status) independently of what `mod_status` can report.
+
+Neither of those knows anything about WordPress itself. That layer is covered by
+the [PromPress](https://wordpress.org/plugins/prompress/) plugin
+(`wpackagist-plugin/prompress`), which instruments WordPress from the inside and
+exposes request counts and durations, peak memory, query counts and durations,
+outbound request timings, emails sent, error counts, and post/user/option totals
+— things no external exporter can see.
+
+It needs two pieces of infrastructure, both already wired up:
+
+- The **`redis` PHP extension** (added in the [Dockerfile](Dockerfile)). This is
+  not optional: the plugin checks for it and, if it is missing, disables itself
+  with nothing but an admin notice. The build validation workflow asserts the
+  extension is present so it cannot be dropped silently.
+- A **Redis instance** to accumulate metrics across PHP requests. The plugin
+  talks to Redis directly rather than through WordPress' object cache, and
+  falls back to `127.0.0.1:6379` when `WP_REDIS_HOST`/`WP_REDIS_PORT` are
+  undefined — so a Redis sidecar bound to loopback needs no configuration at
+  all. Bound to loopback it is also unreachable from the cluster network, which
+  is why it needs no password and therefore no Secret. Persistence is off:
+  counter resets on pod restart are normal and handled by `rate()`.
+
+The plugin's REST routes are **not** served on the public vhosts.
+`/wp-json/prompress/v1/metrics` is unauthenticated unless a token is set in
+wp-admin, and `/wp-json/prompress/v1/storage/wipe` is registered with *no
+permission callback at all*, so anything that can reach it can reset the site's
+counters. [build/apache/bedrock.conf](build/apache/bedrock.conf) therefore denies
+the whole `/wp-json/prompress` prefix at server scope — `:80` and `:443` return
+403 — and re-allows only the read-only metrics route on a dedicated listener,
+port **9118**, the same belt-and-braces shape used for `mod_status`.
+
+Unlike the `mod_status` listener, 9118 is bound to all interfaces, because
+Prometheus scrapes it from outside the pod. It exposes that one route and
+nothing else; restrict who may connect to it with a NetworkPolicy.
+
+Two costs to weigh, since this is in-process instrumentation rather than an
+external poller: every page load now does Redis writes, and every scrape is a
+full WordPress bootstrap — so keep that scrape interval modest. Note also that
+the plugin has not been tested against the last few WordPress releases; since
+this project pins nothing (`>0` constraints, no committed lockfile), verify it
+after WordPress major upgrades.
+
+A full worked example of all four sidecars together, including the mtail
+program, the Redis sidecar and probes for the main container, is in
+[k8s/deployment-example.yaml](k8s/deployment-example.yaml).
+
 Published images use an immutable, architecture-scoped calendar version:
 
 ```text

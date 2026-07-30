@@ -95,6 +95,12 @@ jobs:
           docker exec bedrock_validate apache2ctl -t
           docker exec bedrock_validate apache2ctl -M | grep -E 'rewrite|headers|ssl|php'
 
+          # PromPress keeps its Prometheus counters in Redis and disables
+          # itself with nothing but an admin notice when the PECL extension is
+          # missing. Without this check, dropping it from the Dockerfile's
+          # extension list would surface only as silently absent metrics.
+          docker exec bedrock_validate php -m | grep -x redis
+
           # Architecture contract: Apache/mod_php is the only server runtime.
           # These binaries were present in the old image and would indicate a
           # partial migration if they reappeared.
@@ -112,6 +118,8 @@ jobs:
           grep -F 'ErrorLog: "/proc/self/fd/2"' <<< "${apache_config}"
           docker exec bedrock_validate apache2ctl -t -D DUMP_VHOSTS 2>&1 \
             | grep -F '127.0.0.1:8081'
+          docker exec bedrock_validate apache2ctl -t -D DUMP_VHOSTS 2>&1 \
+            | grep -F ':9118'
           docker exec bedrock_validate grep -F \
             'rotatelogs -f -n 3 /var/log/apache2/access.log 50M' \
             /etc/apache2/sites-enabled/bedrock.conf
@@ -142,6 +150,20 @@ jobs:
           check "uploads php denied" "http://127.0.0.1/app/uploads/probe.php" "403"
           # mod_status must not be reachable on the ingress-facing vhost.
           check "server-status not public" "http://127.0.0.1/server-status" "403"
+
+          # PromPress's REST routes must not be reachable on it either:
+          # /metrics is unauthenticated unless a token is set in wp-admin, and
+          # /storage/wipe is registered with no permission callback at all, so
+          # a public route there would let anyone reset the counters.
+          check "prompress metrics not public" "http://127.0.0.1/wp-json/prompress/v1/metrics" "403"
+          check "prompress wipe not public" "http://127.0.0.1/wp-json/prompress/v1/storage/wipe" "403"
+
+          # The dedicated metrics listener serves that one route and denies
+          # everything else. The route itself needs a database and Redis, so
+          # only the listener being up and the catch-all deny holding are
+          # asserted here - not the route's status code.
+          check "prompress listener catch-all denied" "http://127.0.0.1:9118/" "403"
+          check "prompress listener up" "http://127.0.0.1:9118/wp-json/prompress/v1/metrics" ""
 
           # Telemetry endpoint the Prometheus exporter sidecar scrapes.
           echo "== mod_status =="

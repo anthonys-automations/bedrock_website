@@ -1,0 +1,338 @@
+# Example Kubernetes Deployment for anthonysautomations/bedrock_website.
+#
+# Illustrates the sidecar pattern the README's Telemetry section describes:
+# the image itself stays a single Apache/mod_php process (see Dockerfile), and
+# everything Prometheus-shaped is bolted on as separate containers in the same
+# pod, sharing its network namespace and an emptyDir for the access log.
+#
+# This is a starting point, not a drop-in manifest: replace the image tag,
+# resource figures, env/secret wiring and storage with values for your
+# cluster. Pin the image to an immutable release tag (see
+# docs/image-versioning.md) - never `latest` or `latest-<arch>`.
+#
+# Sidecars included:
+#   1. apache-exporter    - scrapes Apache's own mod_status endpoint
+#                           (127.0.0.1:8081/server-status?auto) and serves it
+#                           as Prometheus metrics. Same tool as the snippet in
+#                           README.md, just wired into a full manifest here.
+#   2. access-log-tail    - follows the access log file and prints each line
+#                           to its own stdout, so `kubectl logs -c
+#                           access-log-tail` (or any node-level log shipper
+#                           watching container stdout) can pick up access
+#                           lines without them mixing into the main
+#                           container's error stream.
+#   3. access-log-exporter - runs mtail against the same access log to derive
+#                           Prometheus counters (requests/bytes by method,
+#                           HTTP version and status) straight from the log
+#                           lines, independent of mod_status. Config is the
+#                           ConfigMap below.
+#   4. redis               - loopback-only storage for the PromPress plugin,
+#                           which accumulates the WordPress-level metrics
+#                           in-process and serves them from Apache on port
+#                           9118. Nothing else uses it.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bedrock-mtail-programs
+data:
+  # Adapted from mtail's own examples/apache_combined.mtail
+  # (https://github.com/google/mtail/blob/main/examples/apache_combined.mtail),
+  # which matches the `combined` LogFormat this image's CustomLog directive
+  # uses (see build/apache/bedrock.conf) - the two must stay in sync if that
+  # LogFormat ever changes.
+  apache_combined.mtail: |
+    # Parser for the Apache "NCSA extended/combined" log format:
+    # LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-agent}i\""
+    counter apache_http_requests_total by request_method, http_version, request_status
+    counter apache_http_bytes_total by request_method, http_version, request_status
+
+    /^/ +
+    /(?P<hostname>[0-9A-Za-z\.:-]+) / +                                        # %h
+    /(?P<remote_logname>[0-9A-Za-z-]+) / +                                     # %l
+    /(?P<remote_username>[0-9A-Za-z-]+) / +                                    # %u
+    /\[(?P<timestamp>\d{2}\/\w{3}\/\d{4}:\d{2}:\d{2}:\d{2} (\+|-)\d{4})\] / +   # %t
+    /"(?P<request_method>[A-Z]+) (?P<URI>\S+) (?P<http_version>HTTP\/[0-9\.]+)" / + # \"%r\"
+    /(?P<request_status>\d{3}) / +                                             # %>s
+    /((?P<response_size>\d+)|-) / +                                            # %b
+    /"(?P<referer>\S+)" / +                                                    # \"%{Referer}i\"
+    /"(?P<user_agent>[[:print:]]+)"/ +                                         # \"%{User-agent}i\"
+    /$/ {
+      strptime($timestamp, "02/Jan/2006:15:04:05 -0700")
+
+      apache_http_requests_total[$request_method][$http_version][$request_status]++
+      $response_size > 0 {
+        apache_http_bytes_total[$request_method][$http_version][$request_status] += $response_size
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bedrock-website
+  labels:
+    app.kubernetes.io/name: bedrock-website
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bedrock-website
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bedrock-website
+    spec:
+      volumes:
+        # Bridges the main container's access log file to the two log
+        # sidecars without either of them needing filesystem access to
+        # anything else in the container. Emptied on pod restart - this is
+        # for in-flight tailing/scraping, not durable log storage.
+        - name: access-logs
+          emptyDir: {}
+        - name: mtail-programs
+          configMap:
+            name: bedrock-mtail-programs
+        # Placeholder for the uploads volume mounted in docker-compose.yml.
+        # Swap for a PersistentVolumeClaim so uploads survive pod
+        # rescheduling; an emptyDir here would silently lose them.
+        - name: uploads
+          emptyDir: {}
+
+      containers:
+        # --- Main application container -----------------------------------
+        - name: bedrock
+          image: anthonysautomations/bedrock_website:2026.07.30.1-amd64
+          ports:
+            - name: http
+              containerPort: 80
+            # WordPress-level metrics, served by Apache from the PromPress
+            # plugin's REST route. A dedicated listener (see
+            # build/apache/bedrock.conf) because the same route is denied on
+            # :80, so the ingress cannot reach it.
+            - name: metrics-wp
+              containerPort: 9118
+          env:
+            - name: SITE_NAME
+              value: example.com
+            - name: ACCESS_LOG
+              value: "on"
+          envFrom:
+            # WP_HOME, WP_SITEURL, DB credentials, etc. - whatever this repo's
+            # .env currently supplies to docker-compose.
+            - secretRef:
+                name: bedrock-env
+          volumeMounts:
+            - name: uploads
+              mountPath: /srv/bedrock/web/app/uploads
+            - name: access-logs
+              mountPath: /var/log/apache2
+          # Mirrors the image's own HEALTHCHECK (Dockerfile): probes Apache
+          # directly via mod_status rather than through WordPress, so a
+          # database outage does not fail liveness.
+          livenessProbe:
+            httpGet:
+              path: /server-status?auto
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Gates traffic on WordPress actually rendering, not just Apache
+          # being up - adjust or replace with a dedicated health endpoint if
+          # coupling readiness to the database is undesirable.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Memory limits but no CPU limits, throughout this manifest: CPU
+          # requests already guarantee a share under contention, while a CPU
+          # limit adds throttling that shows up as latency even when the node
+          # is idle. Add limits only if your cluster policy requires them.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+
+        # --- Sidecar: mod_status -> Prometheus -----------------------------
+        - name: apache-exporter
+          image: bitnami/apache-exporter:1.0.10
+          args:
+            # Containers in a pod share the network namespace, so this
+            # reaches the loopback-only listener defined in
+            # build/apache/bedrock.conf without it ever being exposed
+            # outside the pod.
+            - --scrape_uri=http://127.0.0.1:8081/server-status?auto
+          ports:
+            - name: metrics-apache
+              containerPort: 9117
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+
+        # --- Sidecar: ship access log lines to its own stdout --------------
+        # Keeps access lines out of the main container's stderr stream (which
+        # carries Apache/PHP errors) while still making them visible to
+        # anything that collects container stdout (kubectl logs, a node-level
+        # log agent, etc.), without changing this image's own logging.
+        - name: access-log-tail
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              touch /var/log/apache2/access.log
+              exec tail -F /var/log/apache2/access.log
+          volumeMounts:
+            - name: access-logs
+              mountPath: /var/log/apache2
+              readOnly: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534 # nobody
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+
+        # --- Sidecar: access log -> Prometheus metrics ----------------------
+        # mtail (https://github.com/google/mtail) tails the same file and
+        # turns each line into label-partitioned counters using the program in
+        # the bedrock-mtail-programs ConfigMap above, independent of what
+        # mod_status can report (e.g. per-method/per-status request and byte
+        # counts).
+        - name: access-log-exporter
+          image: ghcr.io/google/mtail:3.0.8
+          args:
+            - --logs=/var/log/apache2/access.log
+            - --progs=/etc/mtail
+            - --port=3903
+          ports:
+            - name: metrics-log
+              containerPort: 3903
+          volumeMounts:
+            - name: access-logs
+              mountPath: /var/log/apache2
+              readOnly: true
+            - name: mtail-programs
+              mountPath: /etc/mtail
+              readOnly: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534 # nobody
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+
+        # --- Sidecar: PromPress metric storage ------------------------------
+        # PromPress accumulates counters and histograms across PHP requests, so
+        # it needs somewhere to keep them between them. It talks to Redis
+        # directly (not through WP's object cache) and defaults to
+        # 127.0.0.1:6379 when WP_REDIS_HOST/PORT are undefined, which is
+        # exactly this container - so there is nothing to configure.
+        #
+        # --bind 127.0.0.1 keeps it inside the pod's network namespace: an
+        # unauthenticated Redis must never be reachable from the cluster
+        # network, and binding to loopback removes the need for a password,
+        # and so for a Secret.
+        #
+        # Persistence is off: these are Prometheus counters, and a reset on pod
+        # restart is normal and handled by rate()/increase().
+        - name: redis
+          image: redis:7.4-alpine
+          args:
+            - --bind
+            - 127.0.0.1
+            - --protected-mode
+            - "yes"
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --maxmemory
+            - 64mb
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999 # redis
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 96Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bedrock-website
+  labels:
+    app.kubernetes.io/name: bedrock-website
+spec:
+  selector:
+    app.kubernetes.io/name: bedrock-website
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: metrics-apache
+      port: 9117
+      targetPort: metrics-apache
+    - name: metrics-log
+      port: 3903
+      targetPort: metrics-log
+    - name: metrics-wp
+      port: 9118
+      targetPort: metrics-wp
+
+# With three independent metrics ports, prefer one PodMonitor per port over
+# `prometheus.io/*` pod annotations (those assume a single scrape port). For
+# the Prometheus Operator, that looks like:
+#
+# apiVersion: monitoring.coreos.com/v1
+# kind: PodMonitor
+# metadata:
+#   name: bedrock-website
+# spec:
+#   selector:
+#     matchLabels:
+#       app.kubernetes.io/name: bedrock-website
+#   podMetricsEndpoints:
+#     - port: metrics-apache
+#       path: /metrics
+#     - port: metrics-log
+#       path: /metrics
+#     # Every scrape here is a full WordPress bootstrap, so keep it modest.
+#     - port: metrics-wp
+#       path: /wp-json/prompress/v1/metrics
+#       interval: 30s

@@ -171,11 +171,10 @@ Three things about that setup are easy to get wrong:
   `security_events` scope.
 - **Automerge needs a check that actually runs.** Because bot pushes trigger
   nothing, the workflow explicitly dispatches
-  [validate-build.yml](../.github/workflows/validate-build.yml) — a build-only,
-  never-publishing job — on each `renovate/*` branch. An API-triggered dispatch
-  *is* allowed to run, so its check lands on the branch head and Renovate merges
-  on a following run once it is green. Merges are gated on a real build, not on
-  `ignoreTests`.
+  [validate-build.yml](../.github/workflows/validate-build.yml) on each
+  `renovate/*` branch. An API-triggered dispatch *is* allowed to run, so its
+  check lands on the branch head and Renovate merges on a following run once it
+  is green. See [testing.md](testing.md) for the validation contract.
 - **Renovate exits 0 when it fails.** An invalid config key or an auth rejection
   produces a green job that did nothing. The workflow therefore runs
   `renovate-config-validator --strict` first, and afterwards asserts on the

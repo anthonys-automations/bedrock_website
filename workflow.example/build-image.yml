@@ -1,131 +1,97 @@
-# Builds and publishes the bedrock_website image as a multi-architecture
-# manifest (linux/amd64 + linux/arm64).
+# Reusable pipeline that builds and publishes a single service image as a
+# multi-architecture manifest (linux/amd64 + linux/arm64).
 #
-# Reworked to implement the calendar tag strategy described in
-# docs/image-versioning.md: deployments (and any downstream Renovate) need
-# releases that are immutable and sortable, which the old `latest` +
-# ISO-timestamp scheme did not provide.
+# Introduced to replace the three near-identical per-service workflows and to
+# implement the agreed Docker tag strategy: downstream Kubernetes repositories
+# track these images with their own Renovate, so releases must be immutable and
+# sortable.
 #
 # Tags published here:
-#   <YYYY>.<MM>.<DD>.<N>   immutable release manifest, this is what deployments pin
+#   <YYYY>.<MM>.<DD>.<N>   immutable release manifest, this is what k8s pins
 #   latest                 moving alias, convenience only - never deploy it
 #
 # Architecture safety is the reason for the three-job shape. Each architecture
 # builds natively on its own GitHub-hosted runner and pushes *untagged*, by
 # digest only; the publish job is the only thing that ever creates a tag, and it
 # depends on every build job succeeding. So if one architecture fails, the
-# release simply does not happen: no tag moves, and a consumer sees no update
-# rather than an update it cannot run on every node. An orphan untagged digest
-# is invisible to tag listings and harmless.
+# release simply does not happen: no tag moves, and downstream Renovate sees no
+# update rather than an update it cannot run on every node. An orphan untagged
+# digest is invisible to tag listings and harmless.
 #
-# This replaces the previous split where CI published `-amd64` tags and arm64
-# was built by hand into its own `-arm64` version stream. One tag now serves
-# every node, so a deployment no longer has to know which architecture it runs
-# on. The suffixed streams survive only as the out-of-band escape hatch in
-# scripts/build-arm64.sh, which never advances this unsuffixed stream.
+# Package inventory is not queried from an independent container before the
+# build (that could drift from what actually gets installed, since Alpine's
+# package index is mutable). Instead the build enables a BuildKit SBOM
+# attestation, which reflects the exact image that gets pushed; inspect it with
+# `docker buildx imagetools inspect --format '{{ json .SBOM }}' <repo>:<tag>`.
 #
-# Package inventory is not queried from an independently pulled base image
-# before the build (that could drift from what actually gets installed, since
-# both the Debian package index and Packagist are mutable). Instead the build
-# enables a BuildKit SBOM attestation, which reflects the exact image that gets
-# pushed; inspect it with:
-#   docker buildx imagetools inspect --format '{{ json .SBOM }}' <repo>:<tag>
-#
-# Consumer Renovate configuration:
-#   # renovate: datasource=docker depName=anthonysautomations/bedrock_website versioning=regex:^(?<major>\d{4})\.(?<minor>\d{2})\.(?<patch>\d{2})\.(?<build>\d+)$
-name: Image build pipeline
+# Downstream Renovate configuration (in the consuming k8s repo):
+#   # renovate: datasource=docker depName=<repo> versioning=regex:^(?<major>\d{4})\.(?<minor>\d{2})\.(?<patch>\d{2})\.(?<build>\d+)$
+name: Build and Publish Image
 
 on:
   workflow_call:
     inputs:
-      branch:
-        required: false
+      service:
+        description: 'Service directory / image name (e.g. tinyproxy); also used as the DockerHub image name'
+        required: true
         type: string
-    outputs:
-      repo:
-        description: 'DockerHub repository the image was pushed to'
-        value: ${{ jobs.prepare.outputs.repo }}
-      version:
-        description: 'Immutable release tag of the published multi-architecture manifest - deploy this one'
-        value: ${{ jobs.prepare.outputs.version }}
-  workflow_dispatch:
-
-  # Weekly rebuild: most releases carry no source change, what actually moves is
-  # the PHP base image, its Debian packages and the Composer dependencies
-  # resolved by `composer update` during the build. The calendar version is what
-  # makes each of those rebuilds visible to an updater.
-  schedule:
-    - cron: '0 2 * * 1'
 
 env:
-  DOCKERHUB_REPO: anthonysautomations/bedrock_website
+  DOCKERHUB_NAMESPACE: anthonysautomations
   # The publish guard fails closed if the build matrix drifts from this contract.
   EXPECTED_PLATFORMS: linux/amd64,linux/arm64
 
-# Serialise the whole release so two runs on the same day cannot race for the
-# same daily sequence number, and so two publish jobs cannot interleave their
-# tag pushes.
+# Serialise the whole release per service so two runs on the same day cannot
+# race for the same daily sequence number, and so two publish jobs cannot
+# interleave their tag pushes.
 concurrency:
-  group: build-bedrock_website
+  group: build-${{ inputs.service }}
   cancel-in-progress: false
 
 jobs:
-  # Every publication path, including this workflow's own schedule and manual
-  # trigger, must pass the same runtime smoke test as a push release.
-  validate:
-    name: "Validate image"
-    uses: ./.github/workflows/validate-build.yml
-    with:
-      branch: ${{ inputs.branch || github.ref }}
-
   # Version and metadata are allocated once and shared by every architecture, so
   # each per-arch image carries byte-identical labels and the manifest describes
   # a single release rather than two coincidental builds.
   prepare:
-    name: "Prepare ${{ inputs.branch || github.ref }}"
-    needs: validate
     runs-on: ubuntu-latest
-
     outputs:
       repo: ${{ steps.version.outputs.repo }}
       version: ${{ steps.version.outputs.version }}
-      php_version: ${{ steps.meta.outputs.php_version }}
+      base_image: ${{ steps.meta.outputs.base_image }}
       created: ${{ steps.meta.outputs.created }}
 
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.branch || github.ref }}
+      - name: Checkout repository
+        uses: actions/checkout@v7
 
       - name: Resolve next release version
         id: version
         run: |
           set -euo pipefail
+          repo="${{ env.DOCKERHUB_NAMESPACE }}/${{ inputs.service }}"
           # No arch argument: allocate from the unsuffixed, multi-arch stream.
-          version=$(./scripts/next-version.sh "${DOCKERHUB_REPO}")
-          echo "repo=${DOCKERHUB_REPO}" >> "$GITHUB_OUTPUT"
+          version=$(./scripts/next-version.sh "${repo}")
+          echo "repo=${repo}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Collect image metadata
         id: meta
         run: |
           set -euo pipefail
+          service='${{ inputs.service }}'
+          dockerfile="${service}/Dockerfile"
 
-          # The PHP release is pinned in the Dockerfile, so read it straight
-          # from there rather than from a separately pulled base image, whose
-          # package index could have moved on since the build started.
-          php_version=$(sed -nE 's|^FROM php:([A-Za-z0-9._-]+).*|\1|p' Dockerfile)
-          php_version=${php_version%%$'\n'*}
-          if [[ -z "${php_version}" ]]; then
-            echo "error: could not determine the pinned PHP base image version" >&2
+          # Record the source-pinned base rather than querying a mutable registry.
+          base_image=$(awk '$1 == "FROM" { print $2; exit }' "${dockerfile}")
+          if [[ -z "${base_image}" ]]; then
+            echo "error: could not determine the pinned base image" >&2
             exit 1
           fi
 
-          echo "php_version=${php_version}" >> "$GITHUB_OUTPUT"
+          echo "base_image=${base_image}" >> "$GITHUB_OUTPUT"
           echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
   build:
-    name: "Build ${{ matrix.arch }}"
     needs: prepare
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -139,22 +105,19 @@ jobs:
           - arch: amd64
             platform: linux/amd64
             runner: ubuntu-latest
-          # Native arm64 runner rather than qemu: emulating a Composer install
-          # and a PHP extension build is slow enough to be its own failure mode.
           - arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
       - name: Login to DockerHub
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.branch || github.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -163,25 +126,25 @@ jobs:
         id: build
         uses: docker/build-push-action@v7
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./${{ inputs.service }}
+          file: ./${{ inputs.service }}/Dockerfile
           platforms: ${{ matrix.platform }}
           sbom: true
           # `push-by-digest` deliberately publishes no tag: an incomplete
-          # release must leave nothing a deployment or Renovate can find. The
-          # publish job below is the only thing that creates a tag.
+          # release must leave nothing that Renovate or a `docker pull` can
+          # find. The publish job below assembles the tags.
           outputs: type=image,name=${{ needs.prepare.outputs.repo }},push-by-digest=true,name-canonical=true,push=true
-          # Full provenance lives in labels and the SBOM: the tag stays short
-          # and sortable while the exact PHP base version and the installed
-          # package inventory (generated by BuildKit from the image that is
-          # actually pushed) remain inspectable.
+          # Full provenance lives in labels/SBOM: the tag stays short and
+          # sortable while the exact base image and installed package
+          # inventory (via the SBOM attestation, generated from the image that
+          # is actually pushed) remain inspectable.
           labels: |
-            org.opencontainers.image.title=bedrock_website
+            org.opencontainers.image.title=${{ inputs.service }}
             org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.created=${{ needs.prepare.outputs.created }}
-            io.anthonysautomations.php.version=${{ needs.prepare.outputs.php_version }}
+            io.anthonysautomations.base.image=${{ needs.prepare.outputs.base_image }}
           # Bake the commit into the image itself (see the Dockerfile ARG) so it
           # is traceable from inside a running container, not only via labels.
           build-args: |
@@ -202,14 +165,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Images cleanup
-        if: always()
-        run: |
-          docker image prune -f
-
   publish:
-    name: "Publish release"
-    # No `if: always()` - this dependency is the gate. If either architecture
+    # No `if: always()` - this dependency is the gate. If any architecture
     # failed, was cancelled, or never got a runner, no tag is created at all.
     needs: [prepare, build]
     runs-on: ubuntu-latest
@@ -251,7 +208,7 @@ jobs:
           done
 
           create_args=(
-            --annotation "index:org.opencontainers.image.title=bedrock_website"
+            --annotation "index:org.opencontainers.image.title=${{ inputs.service }}"
             --annotation "index:org.opencontainers.image.version=${version}"
             --annotation "index:org.opencontainers.image.revision=${{ github.sha }}"
             --annotation "index:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}"
@@ -260,8 +217,6 @@ jobs:
 
           docker buildx imagetools create --dry-run \
             "${create_args[@]}" "${refs[@]}" > /tmp/release-manifest.json
-          # SBOM/provenance attestations show up as `unknown/unknown` entries,
-          # so they are filtered out rather than counted as platform coverage.
           covered_platforms=$(jq -r '[.manifests[] | select(.platform != null and .platform.os != "unknown")
                      | .platform.os + "/" + .platform.architecture]
                      | unique | join(",")' /tmp/release-manifest.json)
@@ -277,7 +232,7 @@ jobs:
           echo "published: ${repo}:${version} covers ${covered_platforms}"
 
       - name: Move the latest alias
-        # Only after verification, and assembled from the verified index, so the
+        # Only after verification, and built from the verified index, so the
         # moving alias can never point at something the guard above rejected.
         run: |
           set -euo pipefail
@@ -288,8 +243,8 @@ jobs:
 
       - name: Add build summary
         run: |
-          # Link straight to the published tag on DockerHub, so the artefact
-          # this run produced can be opened without hunting for it. Only the
+          # Link straight to the published tag on DockerHub so the artefact this
+          # run produced can be inspected without hunting for it. Only the
           # immutable release tag is linked: the moving alias is not deployable
           # and points somewhere else by the time anyone reads this.
           {
@@ -298,6 +253,6 @@ jobs:
             echo "- **Platforms:** ${EXPECTED_PLATFORMS}"
             echo "- **Release tag:** [${{ needs.prepare.outputs.version }}](https://hub.docker.com/layers/${{ needs.prepare.outputs.repo }}/${{ needs.prepare.outputs.version }}/)"
             echo "- **Moving alias:** latest"
-            echo "- **PHP base image:** ${{ needs.prepare.outputs.php_version }}"
+            echo "- **Base image:** ${{ needs.prepare.outputs.base_image }}"
             echo "- **Git Hash:** ${{ github.sha }}"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -6,9 +6,13 @@ never-publishing workflow intended to catch failures on Renovate branches
 before they can be automerged. The Renovate workflow dispatches it explicitly:
 pushes made by the built-in `GITHUB_TOKEN` do not start workflows.
 
-The job runs on `ubuntu-latest`, the same amd64 architecture as the release
-build. It loads the image into the runner's Docker daemon rather than pushing
-it, then starts the services below on a private Docker network:
+The job runs once per published architecture, on `ubuntu-latest` (amd64) and
+`ubuntu-24.04-arm` (arm64) — the same native runners the release build uses. The
+release fails closed when either architecture cannot build, so a base image bump
+that only breaks one of them has to be caught here rather than turning into a
+silently missing release. Each job loads the image into its runner's Docker
+daemon rather than pushing it, then starts the services below on a private
+Docker network:
 
 - A throwaway `mariadb:11` container, with a health check and per-run random
   credentials.

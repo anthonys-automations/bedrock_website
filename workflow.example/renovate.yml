@@ -1,8 +1,9 @@
 # Standalone (self-hosted) Renovate bot run.
-# Added together with the pinned PHP base image: pinning removed the implicit
-# `8.2-apache` drift, so an automated updater is needed to replace it. This
-# workflow's cron is the single source of truth for run timing (renovate.json
-# intentionally has no `schedule`); renovate.json only holds the update policy.
+# Requested to keep the now-pinned Alpine base images and GitHub Actions
+# versions up to date automatically: pinning removed the implicit `latest`
+# drift, so an automated updater is needed to replace it. This workflow's cron
+# is the single source of truth for run timing (renovate.json intentionally has
+# no `schedule`); renovate.json only holds the automerge policy.
 name: Renovate
 
 on:
@@ -18,9 +19,9 @@ on:
           - info
           - debug
 
-  # Bi-daily schedule - runs every 2 days at 03:00 UTC
+  # Weekly schedule - runs every Friday at 03:00 UTC
   schedule:
-    - cron: '0 3 */2 * *'
+    - cron: '0 3 * * 5'
 
 # Renovate pushes branches and opens PRs with the built-in GITHUB_TOKEN, so the
 # job needs write scopes. `issues: write` is for the dependency dashboard issue
@@ -43,7 +44,9 @@ concurrency:
 env:
   # Shared by the config validator and the Renovate run so both use the same
   # release; the action's own default would otherwise drift from the validator
-  # and validation could accept config the run rejects.
+  # and validation could accept config the run rejects. Pinned independently of
+  # the action's default renovate-version, so moving it is a deliberate
+  # Renovate major upgrade rather than a side effect of an action bump.
   RENOVATE_IMAGE_TAG: '43'
   # Written inside the container; /tmp is bind-mounted by the action, so the
   # verification step below can read it back on the runner.
@@ -51,16 +54,14 @@ env:
 
 jobs:
   renovate:
-    # GitHub-hosted on purpose: the Renovate container is published for amd64,
-    # and this run needs nothing from the self-hosted deployment runner.
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # A run with an invalid renovate.json (e.g. an unsupported `comment` key)
-      # still exits 0 from the action, so it would silently do nothing.
+      # A run with an invalid renovate.json (e.g. the unsupported `comment`
+      # key) still exits 0 from the action, so it silently did nothing.
       # Validate first so bad config turns the job red immediately.
       - name: Validate Renovate configuration
         run: |
@@ -70,6 +71,8 @@ jobs:
             renovate-config-validator --strict
 
       - name: Run Renovate
+        # v46 is the first line that runs on node24; v43 ran on node20, which
+        # the runners now warn about as deprecated.
         uses: renovatebot/github-action@v46.2.0
         env:
           # Restrict the run to this repository only
@@ -92,23 +95,21 @@ jobs:
           # LOG_FILE*, which has to be added explicitly or no log file is
           # produced to inspect.
           env-regex: '^(?:RENOVATE_\w+|LOG_LEVEL|LOG_FILE|LOG_FILE_LEVEL|GITHUB_COM_TOKEN|NODE_OPTIONS|NO_COLOR|(?:HTTPS?|NO)_PROXY|(?:https?|no)_proxy)$'
-          # Deliberately the built-in GITHUB_TOKEN rather than a PAT: no secret
-          # to create or rotate. Referencing a RENOVATE_TOKEN secret that does
-          # not exist would abort the run outright ("'token' MUST be passed
-          # using its input or the 'RENOVATE_TOKEN' environment variable"),
-          # since an unset secret expands to an empty string. Three
-          # consequences to be aware of: its pushes never start a workflow run
-          # (hence the explicit dispatch step below), it cannot write files
-          # under .github/workflows (Actions version bumps are therefore routed
-          # to the dependency dashboard for manual application), and it cannot
-          # read Dependabot alerts (so `vulnerabilityAlerts` is disabled in
-          # renovate.json to avoid a permanent "Cannot access vulnerability
+          # The earlier run failed with "'token' MUST be passed using its input
+          # or the 'RENOVATE_TOKEN' environment variable" because it referenced
+          # an unset RENOVATE_TOKEN secret. This repository always uses the
+          # built-in GITHUB_TOKEN instead. Three consequences to be aware of:
+          # its pushes never start a workflow run (hence the explicit dispatch
+          # step below), it cannot write files under .github/workflows (Actions
+          # version bumps are routed to the dependency dashboard), and it
+          # cannot read Dependabot alerts (so `vulnerabilityAlerts` is disabled
+          # in renovate.json to avoid a permanent "Cannot access vulnerability
           # alerts" warning).
           token: ${{ github.token }}
 
       # Renovate exits 0 even when the repository run ends in an error state
-      # (config validation, auth failures, ...), which would show up as a green
-      # job that had done nothing. Inspect the structured log and fail instead.
+      # (config-validation, auth failures, ...), which previously showed up as a
+      # green job that had done nothing. Inspect the structured log and fail.
       - name: Verify Renovate run
         run: |
           set -euo pipefail
@@ -158,7 +159,7 @@ jobs:
             sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${branch}" --jq '.sha')
 
             # Re-dispatching on every scheduled run would pile up duplicate
-            # builds; only a branch head with no validation yet needs one.
+            # runs; only the branch head that has no validation yet needs one.
             existing=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/check-runs" \
               --jq '[.check_runs[] | select(.name | startswith("validate"))] | length')
             if [[ "${existing}" -gt 0 ]]; then
@@ -168,8 +169,8 @@ jobs:
 
             # A branch cut before validate-build.yml existed does not contain
             # the workflow file, so the dispatch is rejected; Renovate rebases
-            # it onto the base branch on a later run and it becomes dispatchable
-            # then.
+            # it onto the base branch on a later run and it becomes
+            # dispatchable then.
             if gh workflow run validate-build.yml --ref "${branch}"; then
               echo "${branch}@${sha:0:7}: validation dispatched"
             else

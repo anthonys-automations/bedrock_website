@@ -5,17 +5,23 @@
 #
 # Added as part of the Docker tag strategy work (docs/image-versioning.md):
 # deployments must pin an immutable tag, and a downstream Renovate needs a
-# monotonically increasing, architecture-scoped version to track. The contract
-# is:
+# monotonically increasing version to track. The contract is:
 #
-#     <YYYY>.<MM>.<DD>.<N>-<arch>      e.g. 2026.07.30.1-arm64
+#     <YYYY>.<MM>.<DD>.<N>[-<arch>]    e.g. 2026.07.30.1
 #
 # The date changes whenever a rebuild happens, which is what actually moves for
 # this repo: the PHP base image, its Debian packages and the Composer
 # dependencies resolved by `composer update` during the build - rarely the
-# source tree. <N> disambiguates multiple builds on the same day. The
-# architecture suffix is consumed by Renovate as the `compatibility` group so an
-# arm64 deployment is never offered an amd64 image (and vice versa).
+# source tree. <N> disambiguates multiple builds on the same day.
+#
+# The architecture argument is optional and selects which version stream is
+# allocated from. CI now builds every architecture in one run and publishes a
+# single multi-architecture manifest, so it allocates from the *unsuffixed*
+# stream by passing no arch. The suffixed streams are counted separately and
+# exist only for out-of-band single-architecture builds
+# (scripts/build-arm64.sh), which must never advance the unsuffixed stream: a
+# release tag that only covers one architecture could otherwise be handed to a
+# node of the other.
 #
 # Failure handling is deliberately fail-closed: only an empty/first-ever
 # repository (HTTP 404) is treated as "no tags yet". Any other non-200
@@ -26,9 +32,10 @@
 # which Renovate would then never see as an update.
 #
 # Usage:
-#   scripts/next-version.sh <dockerhub-repo> <arch>
+#   scripts/next-version.sh <dockerhub-repo> [arch]
 #
-# Example:
+# Examples:
+#   scripts/next-version.sh anthonysautomations/bedrock_website
 #   scripts/next-version.sh anthonysautomations/bedrock_website arm64
 #
 # Prints the new version (without the arch suffix) to stdout. All diagnostics go
@@ -36,13 +43,15 @@
 
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-    echo "usage: $(basename "$0") <dockerhub-repo> <arch>" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+    echo "usage: $(basename "$0") <dockerhub-repo> [arch]" >&2
     exit 2
 fi
 
 repo=$1
-arch=$2
+arch=${2:-}
+# Empty for the multi-architecture stream; "-<arch>" for an out-of-band build.
+suffix=${arch:+-${arch}}
 
 for dep in curl jq; do
     if ! command -v "$dep" >/dev/null 2>&1; then
@@ -89,7 +98,9 @@ esac
 
 highest=0
 # Escape the dots so the date is matched literally rather than as wildcards.
-pattern="^${date_part//./\\.}\\.([0-9]+)-${arch}$"
+# Anchored on the suffix so the two streams are counted independently: without
+# it, an out-of-band `...-arm64` tag would advance the multi-arch sequence.
+pattern="^${date_part//./\\.}\\.([0-9]+)${suffix}$"
 while IFS= read -r name; do
     [[ -n ${name} ]] || continue
     if [[ ${name} =~ ${pattern} ]]; then
@@ -101,7 +112,7 @@ while IFS= read -r name; do
 done < <(jq -r '.results[]?.name // empty' "${body_file}")
 
 version="${date_part}.$(( highest + 1 ))"
-tag="${version}-${arch}"
+tag="${version}${suffix}"
 
 # Release tags are immutable. Verify the computed tag really is unused before
 # handing it back, so a failed/partial listing above can never cause an existing
@@ -124,5 +135,5 @@ case "${tag_status}" in
         ;;
 esac
 
-echo "resolved next version for ${repo} (${arch}): ${tag}" >&2
+echo "resolved next version for ${repo}${arch:+ (${arch})}: ${tag}" >&2
 echo "${version}"

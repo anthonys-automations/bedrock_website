@@ -22,15 +22,21 @@
 # broken. Every request assertion here now names the exact status it expects,
 # and the container's error stream must be free of PHP errors.
 #
-# Runs on the same ubuntu-latest runner as the release build so a base image
-# bump is validated on the architecture it will actually be published for.
+# Runs once per architecture published by image_build.yml. That release fails
+# closed - if either architecture cannot build, no tag is created at all - so a
+# base image bump that only breaks arm64 has to be caught here rather than
+# turning into a silently missing release.
 name: Validate Image Build
 
 on:
   workflow_dispatch:
-  # Lets release.yml gate the published build on this same smoke test,
-  # instead of the two pipelines drifting into separate checks.
+  # Lets image_build.yml gate every publication path on this same smoke test,
+  # instead of scheduled, manual, and push releases drifting apart.
   workflow_call:
+    inputs:
+      branch:
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -49,11 +55,28 @@ env:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    name: "Validate ${{ matrix.arch }}"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      # Both architectures are diagnosed in one run: knowing that only arm64
+      # broke is the useful signal on a Renovate branch.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -63,7 +86,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           push: false
           # Loaded into the local daemon so the runtime smoke test below can
           # actually start it. Since the switch from nginx + PHP-FPM +

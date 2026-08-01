@@ -178,15 +178,21 @@ after WordPress major upgrades.
 The Helm chart below contains the complete deployment, including the mtail
 program, Redis sidecar, and probes for the main container.
 
-Published images use an immutable, architecture-scoped calendar version:
+Published images use an immutable calendar version, released as one
+multi-architecture manifest:
 
 ```text
-anthonysautomations/bedrock_website:<YYYY>.<MM>.<DD>.<N>-<arch>
+anthonysautomations/bedrock_website:<YYYY>.<MM>.<DD>.<N>
 ```
 
-- `amd64` is built by CI (`.github/workflows/image_build.yml`) on push to `dev`/`main` and weekly.
-- `arm64` is built by hand with `./scripts/build-arm64.sh`.
-- `latest-<arch>` is a convenience alias only. **Never deploy it**, and note that the plain `latest` tag is no longer updated.
+- CI (`.github/workflows/image_build.yml`) builds `amd64` and `arm64` on native
+  runners on push to `dev`/`main` and weekly, pushes both by digest with no tag,
+  and only creates the release tag once every architecture succeeded. One tag
+  therefore serves every node.
+- `./scripts/build-arm64.sh` remains an out-of-band escape hatch; it publishes
+  `...-arm64` tags only and never advances the release stream.
+- `latest` is a convenience alias only. **Never deploy it.** The old
+  `...-amd64` / `...-arm64` release tags are no longer produced.
 - The pinned PHP base image is bumped automatically by Renovate (`.github/workflows/renovate.yml`, policy in `renovate.json`). Renovate also tracks the telemetry sidecar images pinned in the chart's templates, and bumps the chart `version` in the same commit; the main image is excluded there, since its rollout is the deliberate `appVersion` bump below.
 
 See [docs/image-versioning.md](docs/image-versioning.md) for the full tag contract, provenance metadata and updater setup.

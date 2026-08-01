@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
 #
-# Manually builds and publishes the bedrock_website image for linux/arm64.
+# Out-of-band build of the bedrock_website image for linux/arm64.
 #
-# Added alongside the amd64 GitHub Actions pipeline: CI runs on ubuntu-latest,
-# so arm64 images are produced by hand on an irregular schedule.
-# They still have to follow the same immutable, sortable, architecture-scoped
-# tag contract as the automated amd64 builds (docs/image-versioning.md), which
-# is why the version is allocated by the very same scripts/next-version.sh.
+# This is an escape hatch, not the normal path: .github/workflows/image_build.yml
+# now builds both architectures natively and publishes them as one
+# multi-architecture manifest under an unsuffixed tag. Use this script only when
+# an arm64 image is needed without (or ahead of) a full release - a runner
+# outage, or a local reproduction of a build failure.
 #
 # Tags published:
-#   <YYYY>.<MM>.<DD>.<N>-arm64   immutable release, this is what deployments pin
+#   <YYYY>.<MM>.<DD>.<N>-arm64   immutable single-architecture build
 #   latest-arm64                 moving alias, convenience only - never deploy it
 #
-# The arm64 version is allocated independently of amd64 on purpose: a manual
-# arm64 build weeks after an amd64 build resolves different Debian packages and
-# different `composer update` results, so pretending they are the same release
-# would be a lie. The unsuffixed tags stay reserved for a promoted
-# multi-architecture manifest.
+# The `-arm64` suffix is load-bearing: this build covers one architecture only,
+# so it allocates from its own version stream (scripts/next-version.sh with an
+# arch argument) and must never advance the unsuffixed stream. Publishing a
+# partial release there would offer a mixed-architecture cluster an image that
+# only runs on some of its nodes - which is exactly what the multi-arch
+# pipeline's publish gate exists to prevent (docs/image-versioning.md).
 #
 # Package inventory is not queried from an independently pulled base image
 # before the build (that could drift from what actually gets installed, since
@@ -179,6 +180,6 @@ docker buildx build \
     "${context_dir}"
 
 echo "==> published ${repo}:${tag} and ${repo}:latest-${arch}"
-# Same DockerHub link the CI build summary emits, so a manual amd64 release is
+# Same DockerHub link the CI build summary emits, so an out-of-band release is
 # just as easy to open and verify.
 echo "==> https://hub.docker.com/layers/${repo}/${tag}/"

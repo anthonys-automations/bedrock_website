@@ -6,7 +6,7 @@
 # builds are reproducible and base image bumps are proposed and reviewed by
 # Renovate (see renovate.json / docs/image-versioning.md) rather than arriving
 # silently on the next rebuild.
-FROM php:8.5.8-apache AS base
+FROM php:8.5.9-apache AS base
 LABEL name=bedrock
 LABEL intermediate=true
 

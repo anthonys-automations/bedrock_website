@@ -51,12 +51,36 @@ Rules:
   runs on some of its nodes.
 - All timestamps are UTC.
 
+## Skipping releases with no relevant changes
+
+`detect-changes`, the first job in
+[.github/workflows/image_build.yml](../.github/workflows/image_build.yml),
+gates every trigger — push (via [release.yml](../.github/workflows/release.yml)),
+the weekly schedule, and a manual run — on whether the Dockerfile, `bedrock/` or
+`build/` actually changed, using the same
+[dorny/paths-filter](https://github.com/dorny/paths-filter) approach as
+[workflow.example/ci.yml](../workflow.example/ci.yml). `validate`, `prepare`,
+`build` and `publish` all cascade-skip when it finds nothing relevant, which is
+what keeps most weekly ticks and unrelated pushes (docs, chart, workflow-only
+changes) from allocating a version and publishing a release that would be
+byte-identical to the previous one.
+
+A manual `workflow_dispatch` run (of either `release.yml` or
+`image_build.yml` directly) exposes a `force` boolean input that bypasses the
+filter and always releases — the escape hatch for picking up a moved PHP base
+image tag or another change the filter cannot see (it only looks at git diffs,
+not the Debian package index or Packagist). The schedule trigger carries no
+inputs, so the weekly rebuild always runs in if-something-changed mode; forcing
+it requires a manual dispatch.
+
 ## Publishing atomically across architectures
 
 [.github/workflows/image_build.yml](../.github/workflows/image_build.yml) is a
 fan-out/fan-in pipeline:
 
 ```text
+detect-changes   skip the rest unless the image build context changed, or `force` was set
+   |
 prepare   allocate one version + one metadata set for the whole release
    |
    +-- build (amd64, ubuntu-latest)  ---+   pushed BY DIGEST, with no tag

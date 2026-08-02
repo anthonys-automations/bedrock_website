@@ -33,6 +33,14 @@
 #
 # Consumer Renovate configuration:
 #   # renovate: datasource=docker depName=anthonysautomations/bedrock_website versioning=regex:^(?<major>\d{4})\.(?<minor>\d{2})\.(?<patch>\d{2})\.(?<build>\d+)$
+#
+# Brought over the same change-gating idea used by workflow.example/ci.yml
+# (dorny/paths-filter): most pushes and every weekly schedule tick previously
+# produced a release even when nothing under the image build context had
+# changed. detect-changes now skips the release unless the Dockerfile, bedrock/
+# or build/ changed, or the run was explicitly `force`d - the escape hatch a
+# manual workflow_dispatch needs when a release is wanted regardless (e.g. to
+# pick up a moved PHP base image tag).
 name: Image build pipeline
 
 on:
@@ -41,6 +49,11 @@ on:
       branch:
         required: false
         type: string
+      force:
+        description: 'Publish a release even if no relevant files changed'
+        required: false
+        type: boolean
+        default: false
     outputs:
       repo:
         description: 'DockerHub repository the image was pushed to'
@@ -49,11 +62,19 @@ on:
         description: 'Immutable release tag of the published multi-architecture manifest - deploy this one'
         value: ${{ jobs.prepare.outputs.version }}
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Publish a release even if no relevant files changed'
+        required: false
+        type: boolean
+        default: false
 
   # Weekly rebuild: most releases carry no source change, what actually moves is
   # the PHP base image, its Debian packages and the Composer dependencies
-  # resolved by `composer update` during the build. The calendar version is what
-  # makes each of those rebuilds visible to an updater.
+  # resolved by `composer update` during the build. Left ungated by `force` (a
+  # schedule trigger carries no inputs anyway) so it still runs in
+  # if-something-changed mode - detect-changes decides from the last commit,
+  # same as any other non-push trigger.
   schedule:
     - cron: '0 2 * * 1'
 
@@ -70,10 +91,62 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Gate every trigger (push via release.yml, the weekly schedule, and manual
+  # runs) on whether the image build context actually changed, mirroring
+  # workflow.example/ci.yml's dorny/paths-filter approach. `base` is pinned to
+  # the ref that triggered the run: for a push that makes paths-filter diff
+  # against the commit before the push (the "long-lived branch" mode in its
+  # docs); for schedule/workflow_dispatch, which carry no push to diff, it
+  # falls back to just the last commit. `force: true` bypasses the filter
+  # entirely for a manual release.
+  detect-changes:
+    name: "Detect changes"
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: filter
+        if: ${{ !inputs.force }}
+        uses: dorny/paths-filter@v4
+        with:
+          base: ${{ inputs.branch || github.ref_name }}
+          filters: |
+            image:
+              - 'Dockerfile'
+              - 'bedrock/**'
+              - 'build/**'
+
+      - name: Decide whether to build
+        id: decide
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.force }}" == "true" ]]; then
+            reason='forced by workflow_dispatch input'
+            should_build=true
+          elif [[ "${{ steps.filter.outputs.image }}" == "true" ]]; then
+            reason='Dockerfile, bedrock/ or build/ changed'
+            should_build=true
+          else
+            reason='no relevant changes detected'
+            should_build=false
+          fi
+          echo "should_build=${should_build}" >> "$GITHUB_OUTPUT"
+          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+          echo "detect-changes: should_build=${should_build} (${reason})"
+
   # Every publication path, including this workflow's own schedule and manual
   # trigger, must pass the same runtime smoke test as a push release.
   validate:
     name: "Validate image"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should_build == 'true'
     uses: ./.github/workflows/validate-build.yml
     with:
       branch: ${{ inputs.branch || github.ref }}
@@ -83,7 +156,8 @@ jobs:
   # a single release rather than two coincidental builds.
   prepare:
     name: "Prepare ${{ inputs.branch || github.ref }}"
-    needs: validate
+    needs: [detect-changes, validate]
+    if: needs.detect-changes.outputs.should_build == 'true'
     runs-on: ubuntu-latest
 
     outputs:
@@ -300,4 +374,24 @@ jobs:
             echo "- **Moving alias:** latest"
             echo "- **PHP base image:** ${{ needs.prepare.outputs.php_version }}"
             echo "- **Git Hash:** ${{ github.sha }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # validate/prepare/build/publish all cascade-skip once detect-changes reports
+  # nothing relevant changed (their `if:`/`needs` chain leads back to it), which
+  # would otherwise leave a run with no summary at all. This is the only job
+  # that runs in that case, so a skipped release is still visible from the run
+  # list instead of looking like a silently do-nothing green check.
+  skip-summary:
+    name: "Release skipped"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should_build != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add build summary
+        run: |
+          {
+            echo "## Build Summary"
+            echo "- **Result:** skipped - no relevant changes detected"
+            echo "- **Repository:** ${DOCKERHUB_REPO}"
+            echo "- Re-run manually with the \`force\` input set to build and publish anyway."
           } >> "$GITHUB_STEP_SUMMARY"

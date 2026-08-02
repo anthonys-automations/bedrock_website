@@ -5,6 +5,11 @@
 # rolled out separately by dispatching container_deploy.yml with the immutable
 # tag this run allocated. Keeping build and deploy apart means a push cannot
 # move a running environment on its own.
+#
+# image_build.yml now skips the release when nothing under the image build
+# context changed (see its own header). A push that only touches unrelated
+# files would otherwise be gated the same way, so `force` is exposed here for a
+# manual run that wants a release regardless.
 name: Release image
 
 on:
@@ -13,6 +18,12 @@ on:
       - dev
       - main
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Publish a release even if no relevant files changed'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   # image_build.yml owns the validation gate so push, scheduled, and manual
@@ -20,4 +31,9 @@ jobs:
   image_build:
     name: "Build image"
     uses: ./.github/workflows/image_build.yml
+    # `inputs` is only populated on a workflow_dispatch run; a push event has no
+    # `force` to read, so this falls back to `false` and stays in
+    # if-something-changed mode.
+    with:
+      force: ${{ inputs.force || false }}
     secrets: inherit

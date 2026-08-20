@@ -57,11 +57,17 @@ The job additionally verifies that:
 
 - No process in the container runs as uid 0, and PID 1 holds an empty
   capability set. The container under test is started with `--cap-drop ALL`,
-  `--security-opt no-new-privileges=true` and
-  `--sysctl net.ipv4.ip_unprivileged_port_start=0`, which is the chart's
-  security context expressed in Docker: the front-door and loopback checks then
-  prove that an unprivileged Apache really can bind :80 and :443 under exactly
-  the privileges the cluster grants, rather than under the daemon's defaults.
+  `--security-opt no-new-privileges=true`,
+  `--sysctl net.ipv4.ip_unprivileged_port_start=0`, `--read-only` and the same
+  writable-path mounts the chart declares (the `HARDENING` variable in the
+  workflow env), which is the chart's security context expressed in Docker: the
+  front-door and loopback checks then prove that an unprivileged Apache really
+  can bind :80 and :443 under exactly the privileges the cluster grants, rather
+  than under the daemon's defaults.
+- The root filesystem rejects a write, and an outbound HTTPS request still
+  verifies. The second half matters because `/etc/ssl/certs` is masked by an
+  empty mount and rebuilt at startup - an empty trust store would not stop
+  Apache, it would silently break every outbound TLS call.
 - Apache with `mod_php` is the only web runtime. `nginx`, `php-fpm`, and
   `supervisord` must not be installed.
 - The `redis` PHP extension is loaded. PromPress keeps its Prometheus counters

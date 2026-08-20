@@ -130,9 +130,13 @@ RUN cd /srv/bedrock \
 #
 # The two CA paths are what lets run.sh keep trusting that certificate without
 # root: update-ca-certificates copies into the first and rewrites the bundle
-# and hash symlinks in the second. It does mean the site user can add a trusted
-# CA to its own container - accepted, since it already owns the PHP code it
-# executes, and the alternative is running the whole server as root.
+# and hash symlinks in the second.
+#
+# The ownership here is what makes the image runnable on its own. Deployments
+# should go further and mount scratch volumes over these paths with a read-only
+# root filesystem, as the Helm chart and both compose files do - that bounds
+# the writes to exactly this list, including the one soft spot above, since the
+# site user being able to add a CA to its own container is otherwise permanent.
 RUN mkdir -p /var/run/apache2 /var/lock/apache2 /etc/ssl/bedrock \
   && chown www-data:www-data \
     /var/run/apache2 \

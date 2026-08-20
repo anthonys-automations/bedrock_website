@@ -52,6 +52,29 @@ env:
   DB_USER: bedrock
   SITE_NAME: bedrock.validate.local
   WP_TITLE: bedrock validate
+  # The chart's container securityContext and writable-path volumes expressed
+  # in Docker, shared by both container runs below so they cannot drift from
+  # each other. Without it the smoke test would pass on privileges the cluster
+  # does not grant: the daemon's own ip_unprivileged_port_start default would
+  # stand in for the pod-level sysctl, and a writable root filesystem would
+  # hide any new startup write. Folded to one line so it word-splits into
+  # arguments. uploads gets a tmpfs only here - in the chart it is the claim.
+  HARDENING: >-
+    --cap-drop ALL
+    --security-opt no-new-privileges=true
+    --sysctl net.ipv4.ip_unprivileged_port_start=0
+    --read-only
+    --tmpfs /run/apache2:rw,uid=33,gid=33
+    --tmpfs /run/lock/apache2:rw,uid=33,gid=33
+    --tmpfs /etc/ssl/bedrock:rw,uid=33,gid=33,mode=0700
+    --tmpfs /usr/local/share/ca-certificates:rw,uid=33,gid=33
+    --tmpfs /etc/ssl/certs:rw,uid=33,gid=33
+    --tmpfs /tmp:rw,uid=33,gid=33,mode=1777
+    --tmpfs /var/www:rw,uid=33,gid=33
+    --tmpfs /var/log/apache2:rw,uid=33,gid=33
+    --tmpfs /srv/bedrock/web/app/cache:rw,uid=33,gid=33
+    --tmpfs /srv/bedrock/web/app/uploads:rw,uid=33,gid=33
+    --tmpfs /srv/bedrock/web/app/plugins/independent-analytics/temp:rw,uid=33,gid=33
 
 jobs:
   validate:
@@ -156,20 +179,17 @@ jobs:
       # is the equivalent of hostAliases in the chart and extra_hosts in
       # compose, so the loopback assertions test the deployed configuration.
       #
-      # The capability, privilege and sysctl flags are the chart's container
-      # security context expressed in Docker. Without them the run would pass
-      # on privileges the cluster does not grant - in particular the daemon's
-      # own ip_unprivileged_port_start default would stand in for the pod-level
-      # sysctl that is what actually lets an unprivileged Apache bind :80/:443.
+      # HARDENING (see the job env) is the chart's security context and
+      # writable-path mounts; it is intentionally unquoted so it splits into
+      # arguments.
       - name: Start the container
         run: |
           set -euo pipefail
 
+          # shellcheck disable=SC2086
           docker run -d --name "${APP_CONTAINER}" --network "${NETWORK}" \
             --add-host "${SITE_NAME}:127.0.0.1" \
-            --cap-drop ALL \
-            --security-opt no-new-privileges=true \
-            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            ${HARDENING} \
             -e SITE_NAME="${SITE_NAME}" \
             -e WP_ENV=production \
             -e WP_HOME="https://${SITE_NAME}" \
@@ -284,6 +304,18 @@ jobs:
           fi
           docker exec "${APP_CONTAINER}" \
             grep -E '^Cap(Prm|Eff|Bnd):[[:space:]]+0+$' /proc/1/status
+
+          # The root filesystem is read-only, so the trust store the entrypoint
+          # rebuilds on a blank tmpfs is worth asserting: an empty one would
+          # not stop Apache, it would silently break every outbound HTTPS call.
+          # web/app is the path to try - it is the one the image hands to
+          # www-data, so a failure there is the mount and not mere ownership.
+          if docker exec "${APP_CONTAINER}" touch /srv/bedrock/web/app/plugins/.w 2>/dev/null; then
+            echo "error: the root filesystem is writable" >&2
+            exit 1
+          fi
+          docker exec "${APP_CONTAINER}" \
+            curl -fsS -o /dev/null https://wordpress.org/
 
           # Verify the active config, not just the checked-in source: errors
           # must reach container stderr and access files must be bounded.
@@ -468,11 +500,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          # shellcheck disable=SC2086
           docker run -d --name "${NOLOG_CONTAINER}" --network "${NETWORK}" \
             --add-host "${SITE_NAME}:127.0.0.1" \
-            --cap-drop ALL \
-            --security-opt no-new-privileges=true \
-            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            ${HARDENING} \
             -e SITE_NAME="${SITE_NAME}" \
             -e ACCESS_LOG=off \
             -e WP_ENV=production \

@@ -25,3 +25,20 @@ services:
       # Written by uid 33 (www-data) inside the container, which no longer
       # starts as root and cannot chown this for you: `chown -R 33:33 $VOL`.
       - $VOL:/srv/bedrock/web/app/uploads
+    # Nothing outside the paths below is written at runtime, so the image runs
+    # on a read-only root filesystem. Kept in step with the volume list in the
+    # Helm chart's deployment - see the comments there for what each path is.
+    # mode=1777 because a tmpfs mount replaces the image's directory, and
+    # compose cannot set its owner.
+    read_only: true
+    tmpfs:
+      - /run/apache2:mode=1777
+      - /run/lock/apache2:mode=1777
+      - /etc/ssl/bedrock:mode=1777
+      - /usr/local/share/ca-certificates:mode=1777
+      - /etc/ssl/certs:mode=1777
+      - /tmp:mode=1777
+      - /var/www:mode=1777
+      - /var/log/apache2:mode=1777
+      - /srv/bedrock/web/app/cache:mode=1777
+      - /srv/bedrock/web/app/plugins/independent-analytics/temp:mode=1777

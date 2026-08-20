@@ -103,6 +103,37 @@ Two consequences are worth knowing before deploying:
   "$SITE_NAME:127.0.0.1"`. Without it, loopback requests to `WP_HOME` resolve
   to the public address and leave the container.
 
+### Read-only root filesystem
+
+The chart and both compose files run the container with
+`readOnlyRootFilesystem: true` (`read_only: true` in compose) and mount scratch
+volumes over every path written at runtime:
+
+| Path | Written by |
+| --- | --- |
+| `/run/apache2` | PID file and the mod_ssl session cache |
+| `/run/lock/apache2` | the file mutexes Debian's `apache2.conf` configures |
+| `/var/log/apache2` | `rotatelogs`, when `ACCESS_LOG` is on |
+| `/etc/ssl/bedrock` | the loopback certificate `run.sh` generates |
+| `/usr/local/share/ca-certificates`, `/etc/ssl/certs` | `update-ca-certificates`, registering that certificate |
+| `/tmp` | PHP upload staging and sessions |
+| `/var/www` | `www-data`'s home, for `wp-cli` in an exec shell |
+| `/srv/bedrock/web/app/cache` | the caching plugins |
+| `/srv/bedrock/web/app/plugins/independent-analytics/temp` | that plugin's scratch space |
+
+Note that `/var/run` and `/var/lock` are symlinks to `/run` and `/run/lock` in
+the Debian base image, so the mounts name the real paths. `/etc/ssl/certs` is
+masked by an empty volume and rebuilt from `/usr/share/ca-certificates` on every
+start; if that ever failed the entrypoint would abort rather than serve with no
+trusted CAs. Everything except uploads is scratch and is meant to be lost on
+restart.
+
+This costs the application nothing: `vendor/`, `web/wp` and the site's PHP were
+already read-only to `www-data`, and `DISALLOW_FILE_MODS` in
+[bedrock/config/application.php](bedrock/config/application.php) already stops
+WordPress from installing or updating plugins and themes - writes that would
+have been lost on the next restart anyway, since only uploads is on a claim.
+
 Only the paths the site actually writes are owned by `www-data`: `web/app`
 (plugins, themes, uploads), Apache's run/lock/log directories, `/etc/ssl/bedrock`
 and the CA store `run.sh` registers the loopback certificate in. The application

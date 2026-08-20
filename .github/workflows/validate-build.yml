@@ -231,7 +231,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          # --cacert: the site's cert is self-signed (see the "https loopback"
+          # check below), and curl otherwise fails verification with no site
+          # response at all.
           response=$(docker exec "${APP_CONTAINER}" curl -sS -w '\n%{http_code}' \
+            --cacert /etc/ssl/bedrock/server.crt \
             -X POST "https://${SITE_NAME}/wp/wp-admin/install.php?step=2" \
             --data-urlencode "weblog_title=${WP_TITLE}" \
             --data-urlencode 'user_name=validate_admin' \
@@ -406,7 +410,9 @@ jobs:
           # pipe early, which makes the writer exit 141 and - with pipefail -
           # fails the step for no reason.
           echo "== front page =="
-          front_page=$(docker exec "${APP_CONTAINER}" curl -sS "https://${SITE_NAME}/")
+          # --cacert: same self-signed cert as the "https loopback" check above.
+          front_page=$(docker exec "${APP_CONTAINER}" \
+            curl -sS --cacert /etc/ssl/bedrock/server.crt "https://${SITE_NAME}/")
           if ! grep -qF "<title>${WP_TITLE}</title>" <<< "${front_page}"; then
             echo "error: front page did not render the expected WordPress output" >&2
             head -n 40 <<< "${front_page}" >&2

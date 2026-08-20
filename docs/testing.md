@@ -17,7 +17,10 @@ Docker network:
 - A throwaway `mariadb:11` container, with a health check and per-run random
   credentials.
 - The image under test, configured with the generated `DB_*` values and a
-  `WP_HOME`/`WP_SITEURL` of `https://bedrock.validate.local`.
+  `WP_HOME`/`WP_SITEURL` of `https://bedrock.validate.local`, started with
+  `--add-host bedrock.validate.local:127.0.0.1`. The unprivileged container
+  cannot write its own `/etc/hosts`, so this stands in for the chart's
+  `hostAliases` and makes the loopback assertion below meaningful.
 
 WordPress is installed through its `install.php?step=2` endpoint. This is
 intentional: without a database the front page returns HTTP 500, which only
@@ -52,6 +55,13 @@ still fails validation.
 
 The job additionally verifies that:
 
+- No process in the container runs as uid 0, and PID 1 holds an empty
+  capability set. The container under test is started with `--cap-drop ALL`,
+  `--security-opt no-new-privileges=true` and
+  `--sysctl net.ipv4.ip_unprivileged_port_start=0`, which is the chart's
+  security context expressed in Docker: the front-door and loopback checks then
+  prove that an unprivileged Apache really can bind :80 and :443 under exactly
+  the privileges the cluster grants, rather than under the daemon's defaults.
 - Apache with `mod_php` is the only web runtime. `nginx`, `php-fpm`, and
   `supervisord` must not be installed.
 - The `redis` PHP extension is loaded. PromPress keeps its Prometheus counters

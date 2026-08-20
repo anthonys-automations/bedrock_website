@@ -108,9 +108,40 @@ COPY ./build/php/php.ini /usr/local/etc/php/conf.d/php.ini
 COPY ./bedrock /srv/bedrock
 # /var/log/php is gone with PHP-FPM: mod_php writes to Apache's error log,
 # which the vhost sends to the container's stderr.
+#
+# The chown is part of this layer rather than a step of its own: web/app is
+# where composer installs the plugins, and chowning it separately would copy
+# that whole tree (WooCommerce alone is hundreds of megabytes) into a second
+# layer. Only web/app is handed over - the application code, vendor/ and web/wp
+# stay root-owned and so are read-only to the running site, while WordPress
+# needs to manage plugins, themes and uploads.
 RUN cd /srv/bedrock \
   && composer update \
+  && chown -R www-data:www-data /srv/bedrock/web/app \
   && chmod +x /run.sh
+
+# Non-root runtime, step 1 of 2: everything Apache and the entrypoint write.
+#
+#   /var/run/apache2   PID file and the mod_ssl session cache
+#   /var/lock/apache2  the file mutexes Debian's apache2.conf configures
+#   /var/log/apache2   rotatelogs writes the access log here
+#   /etc/ssl/bedrock   the loopback certificate run.sh generates
+#   /var/www           www-data's home, so composer/npm/wp-cli work in a shell
+#
+# The two CA paths are what lets run.sh keep trusting that certificate without
+# root: update-ca-certificates copies into the first and rewrites the bundle
+# and hash symlinks in the second. It does mean the site user can add a trusted
+# CA to its own container - accepted, since it already owns the PHP code it
+# executes, and the alternative is running the whole server as root.
+RUN mkdir -p /var/run/apache2 /var/lock/apache2 /etc/ssl/bedrock \
+  && chown www-data:www-data \
+    /var/run/apache2 \
+    /var/lock/apache2 \
+    /var/log/apache2 \
+    /etc/ssl/bedrock \
+    /var/www \
+    /usr/local/share/ca-certificates \
+    /etc/ssl/certs
 
 # Build-time provenance: the Git commit this image was built from, so a running
 # container can be traced back to source for audit (`docker exec <c> printenv
@@ -127,6 +158,20 @@ ENV GIT_COMMIT=${GIT_COMMIT}
 # own readiness probe when application availability must gate traffic.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD curl -fsS -o /dev/null 'http://127.0.0.1:8081/server-status?auto' || exit 1
+
+# Non-root runtime, step 2 of 2: the identity itself. Nothing here runs as uid
+# 0, so Apache never has the privileged phase it normally uses to bind :80 and
+# :443 before dropping its workers. Those ports are not negotiable - WP_HOME is
+# an https:// URL, so WordPress loopback calls arrive on 443 by definition - so
+# the deployment has to make low ports unprivileged instead, with the pod-level
+# net.ipv4.ip_unprivileged_port_start=0 sysctl the Helm chart sets. Docker and
+# Kubernetes both default to that value already; the chart states it so the
+# image does not depend on a default staying put.
+#
+# Named rather than numeric for readability; www-data is uid/gid 33 in the
+# Debian base image. Kubernetes cannot verify a *name* against runAsNonRoot,
+# so the chart pins runAsUser: 33 explicitly - keep the two in step.
+USER www-data
 
 WORKDIR /srv/bedrock
 CMD ["/run.sh"]

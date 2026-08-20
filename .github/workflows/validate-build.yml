@@ -150,11 +150,26 @@ jobs:
       # (Cloudflare/ingress terminate TLS and forward plain HTTP), and the
       # request assertions below reproduce both sides of that: the ingress hop
       # on port 80 and the in-container loopback on 443.
+      #
+      # --add-host replaces the /etc/hosts line run.sh used to append itself:
+      # the container is unprivileged now, and the runtime owns that file. It
+      # is the equivalent of hostAliases in the chart and extra_hosts in
+      # compose, so the loopback assertions test the deployed configuration.
+      #
+      # The capability, privilege and sysctl flags are the chart's container
+      # security context expressed in Docker. Without them the run would pass
+      # on privileges the cluster does not grant - in particular the daemon's
+      # own ip_unprivileged_port_start default would stand in for the pod-level
+      # sysctl that is what actually lets an unprivileged Apache bind :80/:443.
       - name: Start the container
         run: |
           set -euo pipefail
 
           docker run -d --name "${APP_CONTAINER}" --network "${NETWORK}" \
+            --add-host "${SITE_NAME}:127.0.0.1" \
+            --cap-drop ALL \
+            --security-opt no-new-privileges=true \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
             -e SITE_NAME="${SITE_NAME}" \
             -e WP_ENV=production \
             -e WP_HOME="https://${SITE_NAME}" \
@@ -254,6 +269,21 @@ jobs:
               exit 1
             fi
           done
+
+          # Non-root contract. The container holds no capabilities and cannot
+          # gain privileges, so uid 0 must own no process at all; that it also
+          # answered on :80 and :443 above is what proves the unprivileged-port
+          # sysctl, rather than a privileged startup phase, is binding them.
+          echo "== process uids =="
+          uids=$(docker exec "${APP_CONTAINER}" \
+            sh -c 'grep -H "^Uid:" /proc/[0-9]*/status')
+          printf '%s\n' "${uids}"
+          if grep -qE 'Uid:[[:space:]]+0' <<< "${uids}"; then
+            echo "error: a process in the container is running as root" >&2
+            exit 1
+          fi
+          docker exec "${APP_CONTAINER}" \
+            grep -E '^Cap(Prm|Eff|Bnd):[[:space:]]+0+$' /proc/1/status
 
           # Verify the active config, not just the checked-in source: errors
           # must reach container stderr and access files must be bounded.
@@ -439,6 +469,10 @@ jobs:
           set -euo pipefail
 
           docker run -d --name "${NOLOG_CONTAINER}" --network "${NETWORK}" \
+            --add-host "${SITE_NAME}:127.0.0.1" \
+            --cap-drop ALL \
+            --security-opt no-new-privileges=true \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
             -e SITE_NAME="${SITE_NAME}" \
             -e ACCESS_LOG=off \
             -e WP_ENV=production \

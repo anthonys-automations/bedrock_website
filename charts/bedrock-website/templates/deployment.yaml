@@ -21,6 +21,35 @@ spec:
       labels:
         {{- include "bedrock-website.labels" . | nindent 8 }}
     spec:
+      # run.sh used to append this to /etc/hosts itself; it cannot now that the
+      # container is unprivileged, and the mapping is not optional: WP_HOME is
+      # a public https:// name that would otherwise resolve out to Cloudflare
+      # and back for every WordPress loopback/REST call.
+      hostAliases:
+        - ip: 127.0.0.1
+          hostnames:
+            - {{ include "bedrock-website.hostname" . | quote }}
+
+      securityContext:
+        # uid/gid 33 (www-data) - the same identity uploads on the existing
+        # claim were written under while Apache dropped its workers to it, so
+        # this is not a re-owning migration. fsGroup makes the claim writable
+        # for a *new* site; OnRootMismatch keeps the kubelet from walking a
+        # large uploads tree on every start.
+        runAsNonRoot: true
+        runAsUser: 33
+        runAsGroup: 33
+        fsGroup: 33
+        fsGroupChangePolicy: OnRootMismatch
+        # What lets an unprivileged Apache bind :80 and :443 - the alternative,
+        # CAP_NET_BIND_SERVICE on the binary, only works with
+        # allowPrivilegeEscalation true. Namespaced to this pod's network, on
+        # Kubernetes' safe-sysctl list since 1.22, and already the default in
+        # every runtime here; set explicitly so nothing depends on that default.
+        sysctls:
+          - name: net.ipv4.ip_unprivileged_port_start
+            value: "0"
+
       volumes:
         # Bridges the access log file to the two log sidecars. Emptied on pod
         # restart: this is for in-flight tailing, not durable log storage.
@@ -75,6 +104,17 @@ spec:
               subPath: {{ include "bedrock-website.fullname" . }}
             - name: access-logs
               mountPath: /var/log/apache2
+          # Apache runs as www-data throughout rather than starting as root to
+          # bind :80/:443, and the pod's ip_unprivileged_port_start sysctl is
+          # what replaces that privilege, so no capability is needed at all.
+          # The root filesystem stays writable for the startup work: the
+          # loopback certificate, the CA store it is registered in, PID and
+          # lock files.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
           # Probes Apache via mod_status, not WordPress, so a database outage
           # does not fail liveness. exec, not httpGet: the :8081 listener is
           # bound to 127.0.0.1, which the kubelet cannot reach - it probes the
@@ -120,6 +160,9 @@ spec:
               containerPort: 9117
           securityContext:
             runAsNonRoot: true
+            # Pinned so the pod-level runAsUser (33, for the main container)
+            # does not silently move this image off its own default uid.
+            runAsUser: 1001
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:

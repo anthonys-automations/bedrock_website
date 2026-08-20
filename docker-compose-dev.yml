@@ -9,5 +9,14 @@ services:
     ports:
       - 80:80
     env_file: .env
+    # Apache runs as uid 33 and never starts as root, so low ports have to be
+    # unprivileged in the container's network namespace.
+    sysctls:
+      - net.ipv4.ip_unprivileged_port_start=0
+    # The container runs unprivileged and can no longer append this to its own
+    # /etc/hosts, which WordPress loopback calls to WP_HOME depend on.
+    extra_hosts:
+      - "${SITE_NAME:-localhost}:127.0.0.1"
     volumes:
+      # Must be writable by uid 33 (www-data): `chown -R 33:33 /opt/1/uploads`.
       - /opt/1/uploads:/srv/bedrock/web/app/uploads

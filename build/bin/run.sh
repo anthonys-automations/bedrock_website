@@ -6,6 +6,10 @@
 # is now the single process and is exec'd as PID 1 so it receives signals and
 # shuts down gracefully.
 #
+# Runs as www-data, not root (Dockerfile `USER`), so every step here has to work
+# with nothing but ownership of the paths the image hands over. The one thing
+# that cannot: /etc/hosts, which the container runtime owns - see below.
+#
 # The self-signed certificate is kept from the previous setup on purpose. The
 # public front door (Cloudflare -> ingress) is not reachable from inside the
 # container, so WordPress loopback/REST calls have to talk to the container
@@ -44,12 +48,20 @@ CA_CERT=/usr/local/share/ca-certificates/bedrock-loopback.crt
 # Writable content directories. Tolerated as best effort: the uploads path is a
 # mounted volume and a permission failure there should not stop the site from
 # serving.
-mkdir -p /srv/bedrock/web/app/uploads/ /srv/bedrock/web/app/plugins/independent-analytics/temp/
-chown www-data:www-data \
-  /srv/bedrock/web/app/ \
-  /srv/bedrock/web/app/uploads/ \
-  /srv/bedrock/web/app/plugins/independent-analytics/temp/ \
-  || echo "run.sh: warning: could not chown content directories, continuing"
+mkdir -p /srv/bedrock/web/app/uploads/ /srv/bedrock/web/app/plugins/independent-analytics/temp/ \
+  || echo "run.sh: warning: could not create content directories, continuing"
+
+# Ownership of a mounted volume is the platform's job now that this runs
+# unprivileged (fsGroup in Kubernetes, a host-side chown to uid 33 for a bind
+# mount). Attempted only when the image is started with an overridden root
+# user, since a non-root chown of someone else's mount can only ever warn.
+if [[ "$(id -u)" -eq 0 ]]; then
+  chown www-data:www-data \
+    /srv/bedrock/web/app/ \
+    /srv/bedrock/web/app/uploads/ \
+    /srv/bedrock/web/app/plugins/independent-analytics/temp/ \
+    || echo "run.sh: warning: could not chown content directories, continuing"
+fi
 
 # Generated once per container rather than unconditionally: regenerating on
 # every restart pointlessly invalidated the copy already in the CA store.
@@ -74,9 +86,15 @@ fi
 
 # Resolve the public hostname back to this container. Appended only when absent
 # so restarts do not keep growing /etc/hosts.
+#
+# /etc/hosts is mounted root-owned by the container runtime, so this only
+# succeeds when the image is run as root. Unprivileged, the mapping has to come
+# from outside: hostAliases in the pod spec, extra_hosts in compose, or
+# --add-host for a bare `docker run`. Without it SITE_NAME resolves publicly and
+# WordPress loopback calls leave the container (or fail).
 if ! grep -qE "[[:space:]]${SITE_NAME}([[:space:]]|$)" /etc/hosts; then
   echo "127.0.0.1 ${SITE_NAME}" >> /etc/hosts \
-    || echo "run.sh: warning: could not add ${SITE_NAME} to /etc/hosts"
+    || echo "run.sh: warning: ${SITE_NAME} is not mapped to 127.0.0.1 and /etc/hosts is not writable; set hostAliases/extra_hosts/--add-host"
 fi
 
 # Fail fast on a broken vhost instead of crash-looping inside Apache. The same

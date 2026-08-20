@@ -11,5 +11,17 @@ services:
       # deliberately not published.
       - $PORT:80
     env_file: .env
+    # Apache runs as uid 33 and never starts as root, so low ports have to be
+    # unprivileged in the container's network namespace. This is the Docker
+    # default; stated to match the Helm chart and survive a hardened daemon.
+    sysctls:
+      - net.ipv4.ip_unprivileged_port_start=0
+    # The container runs unprivileged and can no longer append this to its own
+    # /etc/hosts. Without it SITE_NAME resolves to the public address and
+    # WordPress loopback calls leave the host. Interpolated from ./.env.
+    extra_hosts:
+      - "${SITE_NAME:-localhost}:127.0.0.1"
     volumes:
+      # Written by uid 33 (www-data) inside the container, which no longer
+      # starts as root and cannot chown this for you: `chown -R 33:33 $VOL`.
       - $VOL:/srv/bedrock/web/app/uploads

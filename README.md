@@ -69,6 +69,47 @@ Ports:
 
 Apache configuration lives in [build/apache/bedrock.conf](build/apache/bedrock.conf).
 
+### Runtime user
+
+Nothing in the container runs as root. The image sets `USER www-data` (uid/gid
+33) and Apache never has a privileged phase: it does not start as root to bind
+:80 and :443 before dropping its workers, and it holds no capabilities at all.
+Port 443 cannot simply be moved out of the privileged range, because `WP_HOME`
+is an `https://` URL and WordPress loopback calls therefore arrive on 443 by
+definition.
+
+Two consequences are worth knowing before deploying:
+
+- **Low ports must be unprivileged in the pod's network namespace.** The chart
+  sets `net.ipv4.ip_unprivileged_port_start=0` in the pod `securityContext`,
+  which is what lets uid 33 bind :80 and :443. It is namespaced to the pod (not
+  the node), has been on Kubernetes' *safe* sysctl list since 1.22, and is
+  already the default in Docker and in Kubernetes - it is set explicitly so the
+  deployment does not silently depend on that default. `docker-compose.yml`
+  declares the same `sysctls` entry. Without it Apache exits with `AH00072:
+  could not bind to address 0.0.0.0:80`.
+
+  The alternative - `cap_net_bind_service` set on `/usr/sbin/apache2` - was
+  rejected: because the entrypoint is a shell script, an `exec` recomputes the
+  permitted capability set from the executed file, and under `no_new_privs` the
+  kernel intersects that with the parent's (empty) permitted set. Making it work
+  would mean `allowPrivilegeEscalation: true`, which is a worse trade than one
+  namespaced sysctl. The container therefore runs with
+  `allowPrivilegeEscalation: false` and `capabilities: drop: [ALL]`.
+- **The host mapping has to come from outside.** `run.sh` can no longer append
+  `127.0.0.1 SITE_NAME` to `/etc/hosts`, which the container runtime owns. The
+  chart supplies it with `hostAliases`, `docker-compose.yml` with
+  `extra_hosts`, and a bare `docker run` needs `--add-host
+  "$SITE_NAME:127.0.0.1"`. Without it, loopback requests to `WP_HOME` resolve
+  to the public address and leave the container.
+
+Only the paths the site actually writes are owned by `www-data`: `web/app`
+(plugins, themes, uploads), Apache's run/lock/log directories, `/etc/ssl/bedrock`
+and the CA store `run.sh` registers the loopback certificate in. The application
+code, `vendor/` and `web/wp` stay root-owned and are read-only to the running
+site. A mounted uploads volume is the platform's to own - `fsGroup: 33` in the
+chart, or `chown -R 33:33` on the host directory for a bind mount.
+
 ### Logs
 
 - **Errors** (Apache *and* PHP) go to the container's stderr, so `kubectl logs`

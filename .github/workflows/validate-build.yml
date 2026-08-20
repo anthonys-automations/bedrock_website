@@ -67,8 +67,6 @@ env:
     --tmpfs /run/apache2:rw,uid=33,gid=33
     --tmpfs /run/lock/apache2:rw,uid=33,gid=33
     --tmpfs /etc/ssl/bedrock:rw,uid=33,gid=33,mode=0700
-    --tmpfs /usr/local/share/ca-certificates:rw,uid=33,gid=33
-    --tmpfs /etc/ssl/certs:rw,uid=33,gid=33
     --tmpfs /tmp:rw,uid=33,gid=33,mode=1777
     --tmpfs /var/www:rw,uid=33,gid=33
     --tmpfs /var/log/apache2:rw,uid=33,gid=33
@@ -305,11 +303,8 @@ jobs:
           docker exec "${APP_CONTAINER}" \
             grep -E '^Cap(Prm|Eff|Bnd):[[:space:]]+0+$' /proc/1/status
 
-          # The root filesystem is read-only, so the trust store the entrypoint
-          # rebuilds on a blank tmpfs is worth asserting: an empty one would
-          # not stop Apache, it would silently break every outbound HTTPS call.
-          # web/app is the path to try - it is the one the image hands to
-          # www-data, so a failure there is the mount and not mere ownership.
+          # web/app is owned by www-data, so failure here proves the filesystem
+          # is read-only rather than merely inaccessible through ownership.
           if docker exec "${APP_CONTAINER}" touch /srv/bedrock/web/app/plugins/.w 2>/dev/null; then
             echo "error: the root filesystem is writable" >&2
             exit 1
@@ -356,10 +351,20 @@ jobs:
           # to WP_HOME rather than serving the page.
           check "http front door" 200 \
             -H "Host: ${SITE_NAME}" -H 'X-Forwarded-Proto: https' 'http://127.0.0.1/'
-          # Loopback path: verifies the generated certificate is trusted
-          # in-container and that SITE_NAME resolves back to Apache. curl is
-          # intentionally not given -k here.
-          check "https loopback" 200 "https://${SITE_NAME}/"
+          # curl receives the same generated certificate that the WordPress
+          # HTTP client selects through the loopback-tls mu-plugin below.
+          check "https loopback" 200 \
+            --cacert /etc/ssl/bedrock/server.crt "https://${SITE_NAME}/"
+
+          docker exec "${APP_CONTAINER}" php -r '
+            require "/srv/bedrock/web/wp/wp-load.php";
+            $response = wp_remote_get(home_url("/"), ["sslverify" => true]);
+            if (is_wp_error($response)) {
+                fwrite(STDERR, $response->get_error_message() . PHP_EOL);
+                exit(1);
+            }
+            exit(wp_remote_retrieve_response_code($response) === 200 ? 0 : 1);
+          '
           # PHP must never execute from the uploads volume: 403 is the pass
           # condition here, not a failure being tolerated.
           check "uploads php denied" 403 'http://127.0.0.1/app/uploads/probe.php'

@@ -43,7 +43,6 @@ case "${ACCESS_LOG:-on}" in
 esac
 
 CERT_DIR=/etc/ssl/bedrock
-CA_CERT=/usr/local/share/ca-certificates/bedrock-loopback.crt
 
 # Writable content directories. Tolerated as best effort: the uploads path is a
 # mounted volume and a permission failure there should not stop the site from
@@ -51,20 +50,7 @@ CA_CERT=/usr/local/share/ca-certificates/bedrock-loopback.crt
 mkdir -p /srv/bedrock/web/app/uploads/ /srv/bedrock/web/app/plugins/independent-analytics/temp/ \
   || echo "run.sh: warning: could not create content directories, continuing"
 
-# Ownership of a mounted volume is the platform's job now that this runs
-# unprivileged (fsGroup in Kubernetes, a host-side chown to uid 33 for a bind
-# mount). Attempted only when the image is started with an overridden root
-# user, since a non-root chown of someone else's mount can only ever warn.
-if [[ "$(id -u)" -eq 0 ]]; then
-  chown www-data:www-data \
-    /srv/bedrock/web/app/ \
-    /srv/bedrock/web/app/uploads/ \
-    /srv/bedrock/web/app/plugins/independent-analytics/temp/ \
-    || echo "run.sh: warning: could not chown content directories, continuing"
-fi
-
-# Generated once per container rather than unconditionally: regenerating on
-# every restart pointlessly invalidated the copy already in the CA store.
+# Generated only when the mounted certificate directory is empty.
 # SITE_NAME goes in a SAN because CN-only certificates are no longer accepted
 # by modern OpenSSL/cURL verification.
 if [[ ! -s "${CERT_DIR}/server.crt" || ! -s "${CERT_DIR}/server.key" ]]; then
@@ -77,24 +63,13 @@ if [[ ! -s "${CERT_DIR}/server.crt" || ! -s "${CERT_DIR}/server.key" ]]; then
   chmod 600 "${CERT_DIR}/server.key"
 fi
 
-# Trusted in-container so PHP/cURL loopback requests to https://${SITE_NAME}
-# validate instead of having to disable verification.
-if ! cmp -s "${CERT_DIR}/server.crt" "${CA_CERT}"; then
-  cp "${CERT_DIR}/server.crt" "${CA_CERT}"
-  update-ca-certificates
-fi
+# WordPress uses this certificate directly for same-host requests via the
+# loopback-tls mu-plugin; the system trust store remains immutable.
 
-# Resolve the public hostname back to this container. Appended only when absent
-# so restarts do not keep growing /etc/hosts.
-#
-# /etc/hosts is mounted root-owned by the container runtime, so this only
-# succeeds when the image is run as root. Unprivileged, the mapping has to come
-# from outside: hostAliases in the pod spec, extra_hosts in compose, or
-# --add-host for a bare `docker run`. Without it SITE_NAME resolves publicly and
-# WordPress loopback calls leave the container (or fail).
+# The runtime owns /etc/hosts, so the hostname mapping must come from the
+# deployment rather than this unprivileged entrypoint.
 if ! grep -qE "[[:space:]]${SITE_NAME}([[:space:]]|$)" /etc/hosts; then
-  echo "127.0.0.1 ${SITE_NAME}" >> /etc/hosts \
-    || echo "run.sh: warning: ${SITE_NAME} is not mapped to 127.0.0.1 and /etc/hosts is not writable; set hostAliases/extra_hosts/--add-host"
+  echo "run.sh: warning: ${SITE_NAME} is not mapped to 127.0.0.1; set hostAliases/extra_hosts/--add-host" >&2
 fi
 
 # Fail fast on a broken vhost instead of crash-looping inside Apache. The same

@@ -20,18 +20,14 @@ services:
     volumes:
       # Must be writable by uid 33 (www-data): `chown -R 33:33 /opt/1/uploads`.
       - /opt/1/uploads:/srv/bedrock/web/app/uploads
-    # Same read-only root filesystem as the chart and docker-compose.yml, so
-    # what is tested here is what is deployed. mode=1777 because a tmpfs mount
-    # replaces the image's directory and compose cannot set its owner.
+    # Same writable paths and ownership as the chart and docker-compose.yml.
     read_only: true
     tmpfs:
-      - /run/apache2:mode=1777
-      - /run/lock/apache2:mode=1777
-      - /etc/ssl/bedrock:mode=1777
-      - /usr/local/share/ca-certificates:mode=1777
-      - /etc/ssl/certs:mode=1777
-      - /tmp:mode=1777
-      - /var/www:mode=1777
-      - /var/log/apache2:mode=1777
-      - /srv/bedrock/web/app/cache:mode=1777
-      - /srv/bedrock/web/app/plugins/independent-analytics/temp:mode=1777
+      - /run/apache2:uid=33,gid=33
+      - /run/lock/apache2:uid=33,gid=33
+      - /etc/ssl/bedrock:uid=33,gid=33,mode=0700
+      - /tmp:uid=33,gid=33,mode=1777
+      - /var/www:uid=33,gid=33
+      - /var/log/apache2:uid=33,gid=33
+      - /srv/bedrock/web/app/cache:uid=33,gid=33
+      - /srv/bedrock/web/app/plugins/independent-analytics/temp:uid=33,gid=33

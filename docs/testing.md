@@ -64,10 +64,9 @@ The job additionally verifies that:
   front-door and loopback checks then prove that an unprivileged Apache really
   can bind :80 and :443 under exactly the privileges the cluster grants, rather
   than under the daemon's defaults.
-- The root filesystem rejects a write, and an outbound HTTPS request still
-  verifies. The second half matters because `/etc/ssl/certs` is masked by an
-  empty mount and rebuilt at startup - an empty trust store would not stop
-  Apache, it would silently break every outbound TLS call.
+- The root filesystem rejects a write, outbound HTTPS still verifies against
+  the immutable system trust store, and a `wp_remote_get()` with certificate
+  verification enabled succeeds over the generated loopback certificate.
 - Apache with `mod_php` is the only web runtime. `nginx`, `php-fpm`, and
   `supervisord` must not be installed.
 - The `redis` PHP extension is loaded. PromPress keeps its Prometheus counters

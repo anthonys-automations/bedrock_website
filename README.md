@@ -61,11 +61,10 @@ Ports:
   the k8s ingress controller or a host reverse proxy), which forwards plain
   HTTP to the container.
 - **443** - internal only. `run.sh` generates a self-signed certificate for
-  `SITE_NAME`, installs it into the container's CA store and points `SITE_NAME`
-  at `127.0.0.1`, so WordPress loopback/REST calls against the `https://` value
-  of `WP_HOME` succeed without leaving the container. Nothing outside the
-  container is expected to trust that certificate, and this port should not be
-  published.
+  `SITE_NAME`; the `loopback-tls` mu-plugin selects it for WordPress requests to
+  that host. The deployment maps `SITE_NAME` to `127.0.0.1`, so those requests
+  stay in the container. Nothing external should trust this certificate or
+  publish this port.
 
 Apache configuration lives in [build/apache/bedrock.conf](build/apache/bedrock.conf).
 
@@ -106,8 +105,9 @@ Two consequences are worth knowing before deploying:
 ### Read-only root filesystem
 
 The chart and both compose files run the container with
-`readOnlyRootFilesystem: true` (`read_only: true` in compose) and mount scratch
-volumes over every path written at runtime:
+`readOnlyRootFilesystem: true` (`read_only: true` in compose). The chart groups
+scratch paths into runtime, TLS, and application volumes; a non-root init
+container creates their `subPath` directories before Apache starts.
 
 | Path | Written by |
 | --- | --- |
@@ -115,18 +115,15 @@ volumes over every path written at runtime:
 | `/run/lock/apache2` | the file mutexes Debian's `apache2.conf` configures |
 | `/var/log/apache2` | `rotatelogs`, when `ACCESS_LOG` is on |
 | `/etc/ssl/bedrock` | the loopback certificate `run.sh` generates |
-| `/usr/local/share/ca-certificates`, `/etc/ssl/certs` | `update-ca-certificates`, registering that certificate |
 | `/tmp` | PHP upload staging and sessions |
 | `/var/www` | `www-data`'s home, for `wp-cli` in an exec shell |
 | `/srv/bedrock/web/app/cache` | the caching plugins |
 | `/srv/bedrock/web/app/plugins/independent-analytics/temp` | that plugin's scratch space |
 
-Note that `/var/run` and `/var/lock` are symlinks to `/run` and `/run/lock` in
-the Debian base image, so the mounts name the real paths. `/etc/ssl/certs` is
-masked by an empty volume and rebuilt from `/usr/share/ca-certificates` on every
-start; if that ever failed the entrypoint would abort rather than serve with no
-trusted CAs. Everything except uploads is scratch and is meant to be lost on
-restart.
+`/var/run` and `/var/lock` are symlinks in the Debian base image, so the mounts
+name their real `/run` paths. The `loopback-tls` mu-plugin uses the generated
+certificate only for WordPress requests to `SITE_NAME`; the system trust store
+stays immutable. Everything except uploads is scratch and is lost on restart.
 
 This costs the application nothing: `vendor/`, `web/wp` and the site's PHP were
 already read-only to `www-data`, and `DISALLOW_FILE_MODS` in
@@ -134,12 +131,10 @@ already read-only to `www-data`, and `DISALLOW_FILE_MODS` in
 WordPress from installing or updating plugins and themes - writes that would
 have been lost on the next restart anyway, since only uploads is on a claim.
 
-Only the paths the site actually writes are owned by `www-data`: `web/app`
-(plugins, themes, uploads), Apache's run/lock/log directories, `/etc/ssl/bedrock`
-and the CA store `run.sh` registers the loopback certificate in. The application
-code, `vendor/` and `web/wp` stay root-owned and are read-only to the running
-site. A mounted uploads volume is the platform's to own - `fsGroup: 33` in the
-chart, or `chown -R 33:33` on the host directory for a bind mount.
+Only the paths the site writes are owned by `www-data`: `web/app`, Apache's
+run/lock/log directories, `/etc/ssl/bedrock`, and `/var/www`. Application code,
+`vendor/` and `web/wp` stay root-owned. The chart's non-root init container
+creates a new site's uploads subdirectory; bind mounts must be owned by uid 33.
 
 ### Logs
 

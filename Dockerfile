@@ -122,30 +122,22 @@ RUN cd /srv/bedrock \
 
 # Non-root runtime, step 1 of 2: everything Apache and the entrypoint write.
 #
-#   /var/run/apache2   PID file and the mod_ssl session cache
-#   /var/lock/apache2  the file mutexes Debian's apache2.conf configures
+#   /run/apache2       PID file and the mod_ssl session cache
+#   /run/lock/apache2  the file mutexes Debian's apache2.conf configures
 #   /var/log/apache2   rotatelogs writes the access log here
 #   /etc/ssl/bedrock   the loopback certificate run.sh generates
 #   /var/www           www-data's home, so composer/npm/wp-cli work in a shell
 #
-# The two CA paths are what lets run.sh keep trusting that certificate without
-# root: update-ca-certificates copies into the first and rewrites the bundle
-# and hash symlinks in the second.
-#
 # The ownership here is what makes the image runnable on its own. Deployments
 # should go further and mount scratch volumes over these paths with a read-only
-# root filesystem, as the Helm chart and both compose files do - that bounds
-# the writes to exactly this list, including the one soft spot above, since the
-# site user being able to add a CA to its own container is otherwise permanent.
+# root filesystem, as the Helm chart and both compose files do.
 RUN mkdir -p /var/run/apache2 /var/lock/apache2 /etc/ssl/bedrock \
   && chown www-data:www-data \
     /var/run/apache2 \
     /var/lock/apache2 \
     /var/log/apache2 \
     /etc/ssl/bedrock \
-    /var/www \
-    /usr/local/share/ca-certificates \
-    /etc/ssl/certs
+    /var/www
 
 # Build-time provenance: the Git commit this image was built from, so a running
 # container can be traced back to source for audit (`docker exec <c> printenv

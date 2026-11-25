@@ -305,7 +305,7 @@ spec:
         # needs no password and so no Secret. Persistence is off - counter
         # resets on restart are normal and handled by rate().
         - name: redis
-          image: redis:8.10-alpine
+          image: redis:8.12-alpine
           args:
             - --bind
             - 127.0.0.1
